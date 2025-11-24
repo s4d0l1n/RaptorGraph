@@ -4,7 +4,7 @@ import { useUIStore } from './stores/uiStore'
 import { useGraphStore } from './stores/graphStore'
 import { FileUpload, CSVFilesList } from './components/FileUpload'
 import { ColumnMapper } from './components/ColumnMapper'
-import { GraphView, GraphControls } from './components/GraphView'
+import { G6GraphView } from './components/GraphView'
 import { NodeDetailPanel } from './components/NodeDetailPanel'
 import { StyleRulesPanel } from './components/StyleRulesPanel'
 import { CardTemplatePanel } from './components/CardTemplatePanel'
@@ -152,8 +152,7 @@ function App() {
           /* Graph View */
           <div className="h-full relative">
             <Sidebar />
-            <GraphView />
-            <GraphControls />
+            <G6GraphView />
           </div>
         )}
       </main>

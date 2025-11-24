@@ -50,15 +50,17 @@ function resolveAttributeDisplay(
 }
 
 export function NodeDetailPanel() {
-  const { selectedNode, closePanel } = useUIStore()
-  const { getEdgesForNode } = useGraphStore()
+  const { closePanel } = useUIStore()
+  const { nodes, getEdgesForNode } = useGraphStore()
   const { getDefaultTemplate, getCardTemplate } = useCardTemplateStore()
   const { getAttributeTemplate, getDefaultTemplate: getDefaultAttributeTemplate } = useAttributeTemplateStore()
   const { getEnabledRules } = useStyleStore()
 
-  if (!selectedNode) return null
+  // Get selected node from localStorage (set by G6GraphView)
+  const selectedNodeId = localStorage.getItem('selectedNodeId')
+  const data = nodes.find(n => n.id === selectedNodeId)
 
-  const { data } = selectedNode
+  if (!data) return null
   const edges = getEdgesForNode(data.id)
 
   // Get the active card template for this node

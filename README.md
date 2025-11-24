@@ -40,15 +40,15 @@ Transform your CSVs into powerful, interactive network graphs—100% offline, ze
 - Special stub node styling
 
 ### 📈 **Advanced Graph Visualization**
-- **Cytoscape.js** powered rendering
+- **G6 (AntV)** powered rendering - optimized for large datasets
 - Multiple layout algorithms:
-  - Force-directed (cose-bilkent) - default
-  - Constraint-based (cola)
-  - Circle, Grid, Preset
-- Pan, zoom, box-select
+  - Force-directed (D3-Force) - default
+  - Hierarchical (Dagre)
+  - Circular, Grid, Radial, Concentric
+- Pan, zoom, drag nodes
 - Node click → detail panel
-- Double-click → center & highlight neighbors
-- Fit to screen, export PNG/SVG
+- Fit to screen, export PNG
+- Excellent performance with 10,000+ nodes
 
 ### 💾 **Project Save/Load**
 - Save entire project as `.protojson` file
@@ -213,7 +213,7 @@ src/
 - **Build**: Vite 6
 - **Styling**: Tailwind CSS 3 (dark mode)
 - **State**: Zustand 5
-- **Graph**: Cytoscape.js + cose-bilkent + cola
+- **Graph**: G6 (AntV) v5 - WebGL accelerated
 - **CSV**: PapaParse
 - **Icons**: Lucide React
 
@@ -319,7 +319,7 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 
 ## 🙏 Acknowledgments
 
-- **Cytoscape.js** - Graph visualization library
+- **G6 (AntV)** - High-performance graph visualization
 - **PapaParse** - CSV parsing
 - **Zustand** - State management
 - **Tailwind CSS** - Styling

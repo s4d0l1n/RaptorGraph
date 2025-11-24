@@ -10,12 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@antv/g6": "^5.0.50",
+    "@antv/layout": "^1.2.14-beta.9",
     "@tabler/icons": "^3.35.0",
-    "cytoscape": "^3.30.3",
-    "cytoscape-cola": "^2.5.1",
-    "cytoscape-cose-bilkent": "^4.1.0",
-    "cytoscape-dagre": "^2.5.0",
-    "cytoscape-fcose": "^2.2.0",
     "dagre": "^0.8.5",
     "lucide-react": "^0.462.0",
     "papaparse": "^5.4.1",
