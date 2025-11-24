@@ -4,12 +4,13 @@
  */
 
 import { useState } from 'react'
-import { Menu, Download, Upload, Palette, Layers, Type, ArrowRightLeft, X, ChevronRight } from 'lucide-react'
+import { Menu, Download, Upload, Palette, Layers, Type, ArrowRightLeft, X, ChevronRight, Network } from 'lucide-react'
 import { useUIStore } from '../stores/uiStore'
 import { useCardTemplateStore } from '../stores/cardTemplateStore'
 import { useAttributeTemplateStore } from '../stores/attributeTemplateStore'
 import { useEdgeTemplateStore } from '../stores/edgeTemplateStore'
 import { useStyleStore } from '../stores/styleStore'
+import { useLayoutStore } from '../stores/layoutStore'
 
 export function Sidebar() {
   const [isOpen, setIsOpen] = useState(false)
@@ -18,6 +19,7 @@ export function Sidebar() {
   const { exportAttributeTemplates, importAttributeTemplates } = useAttributeTemplateStore()
   const { exportEdgeTemplates, importEdgeTemplates } = useEdgeTemplateStore()
   const { getEnabledRules, importStyleRules } = useStyleStore()
+  const { layoutConfig, setLayoutType } = useLayoutStore()
 
   const handleMenuClick = (panel: keyof typeof useUIStore.prototype) => {
     openPanel(panel as any)
@@ -170,6 +172,31 @@ export function Sidebar() {
                   color="bg-teal-600 hover:bg-teal-700"
                   onClick={() => handleMenuClick('edgeTemplatePanel')}
                 />
+              </div>
+
+              {/* Layout Section */}
+              <div className="mb-6">
+                <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-3">
+                  Graph Layout
+                </div>
+                <div className="px-3 space-y-2">
+                  <select
+                    value={layoutConfig.type}
+                    onChange={(e) => setLayoutType(e.target.value as any)}
+                    className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-cyan-500 dark:focus:ring-cyan-400"
+                  >
+                    <option value="force">Force Directed</option>
+                    <option value="dagre">Hierarchical (Dagre)</option>
+                    <option value="circular">Circular</option>
+                    <option value="grid">Grid</option>
+                    <option value="concentric">Concentric</option>
+                    <option value="radial">Radial</option>
+                  </select>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    <Network className="w-3 h-3 inline mr-1" />
+                    Choose how nodes are arranged
+                  </p>
+                </div>
               </div>
             </div>
           </nav>
