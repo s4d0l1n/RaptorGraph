@@ -14,6 +14,9 @@ interface UIState {
   selectedNodeId: string | null
   selectedEdgeIds: string[]
 
+  // Filter state
+  filteredNodeIds: Set<string> | null
+
   // Dark mode
   darkMode: boolean
 
@@ -26,6 +29,7 @@ interface UIState {
   setActivePanel: (panelId: string | null) => void
   setSelectedNodeId: (nodeId: string | null) => void
   setSelectedEdgeIds: (edgeIds: string[]) => void
+  setFilteredNodeIds: (nodeIds: Set<string> | null) => void
   toggleDarkMode: () => void
   setLoading: (isLoading: boolean, message?: string) => void
   clearSelection: () => void
@@ -37,6 +41,7 @@ export const useUIStore = create<UIState>((set) => ({
   activePanel: null,
   selectedNodeId: null,
   selectedEdgeIds: [],
+  filteredNodeIds: null,
   darkMode: true,
   isLoading: false,
   loadingMessage: '',
@@ -53,6 +58,9 @@ export const useUIStore = create<UIState>((set) => ({
 
   setSelectedEdgeIds: (edgeIds) =>
     set({ selectedEdgeIds: edgeIds }),
+
+  setFilteredNodeIds: (nodeIds) =>
+    set({ filteredNodeIds: nodeIds }),
 
   toggleDarkMode: () =>
     set((state) => ({ darkMode: !state.darkMode })),

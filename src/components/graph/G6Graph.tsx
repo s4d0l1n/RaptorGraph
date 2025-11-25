@@ -17,11 +17,16 @@ interface NodePosition {
 export function G6Graph() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { nodes, edges } = useGraphStore()
-  const { setSelectedNodeId, selectedNodeId } = useUIStore()
+  const { setSelectedNodeId, selectedNodeId, filteredNodeIds } = useUIStore()
   const { layoutConfig } = useProjectStore()
   const [nodePositions, setNodePositions] = useState<Map<string, NodePosition>>(new Map())
   const [swimlanes, setSwimlanes] = useState<Map<string, number>>(new Map())
   const animationRef = useRef<number>()
+
+  // Get visible nodes based on filter
+  const visibleNodes = filteredNodeIds
+    ? nodes.filter((node) => filteredNodeIds.has(node.id))
+    : nodes
 
   // Initialize node positions
   useEffect(() => {
@@ -138,8 +143,15 @@ export function G6Graph() {
         })
       }
 
-      // Draw edges
+      // Draw edges (only if both source and target are visible)
       edges.forEach((edge) => {
+        // Skip if either node is filtered out
+        if (filteredNodeIds) {
+          if (!filteredNodeIds.has(edge.source) || !filteredNodeIds.has(edge.target)) {
+            return
+          }
+        }
+
         const sourcePos = nodePositions.get(edge.source)
         const targetPos = nodePositions.get(edge.target)
 
@@ -174,8 +186,8 @@ export function G6Graph() {
         }
       })
 
-      // Draw nodes as cards
-      nodes.forEach((node) => {
+      // Draw nodes as cards (only visible nodes)
+      visibleNodes.forEach((node) => {
         const pos = nodePositions.get(node.id)
         if (!pos) return
 
@@ -258,7 +270,7 @@ export function G6Graph() {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [nodes, edges, nodePositions, selectedNodeId])
+  }, [nodes, edges, nodePositions, selectedNodeId, filteredNodeIds, visibleNodes, swimlanes])
 
   return (
     <div className="relative w-full h-full">
