@@ -3,6 +3,10 @@ import { useGraphStore } from '@/stores/graphStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { calculateTimelineLayout } from '@/lib/layouts/timelineLayout'
+import { calculateCircleLayout } from '@/lib/layouts/circleLayout'
+import { calculateGridLayout } from '@/lib/layouts/gridLayout'
+import { calculateConcentricLayout } from '@/lib/layouts/concentricLayout'
+import { calculateRandomLayout } from '@/lib/layouts/randomLayout'
 
 interface NodePosition {
   x: number
@@ -39,36 +43,71 @@ export function G6Graph() {
     const width = canvas.offsetWidth
     const height = canvas.offsetHeight
 
-    // Use timeline layout if configured
-    if (layoutConfig.type === 'timeline') {
-      const result = calculateTimelineLayout(nodes, {
-        width,
-        height,
-        swimlaneAttribute: layoutConfig.timelineSwimlaneAttribute,
-      })
-
-      result.positions.forEach((pos, nodeId) => {
-        positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
-      })
-
-      setSwimlanes(result.swimlanes)
-    } else {
-      // Default circular layout
-      const centerX = width / 2
-      const centerY = height / 2
-      const radius = Math.min(width, height) / 3
-
-      nodes.forEach((node, i) => {
-        const angle = (i / nodes.length) * Math.PI * 2
-        positions.set(node.id, {
-          x: centerX + Math.cos(angle) * radius,
-          y: centerY + Math.sin(angle) * radius,
-          vx: 0,
-          vy: 0,
+    // Apply layout based on configuration
+    switch (layoutConfig.type) {
+      case 'timeline': {
+        const result = calculateTimelineLayout(nodes, {
+          width,
+          height,
+          swimlaneAttribute: layoutConfig.timelineSwimlaneAttribute,
         })
-      })
+        result.positions.forEach((pos, nodeId) => {
+          positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+        })
+        setSwimlanes(result.swimlanes)
+        break
+      }
 
-      setSwimlanes(new Map())
+      case 'circle': {
+        const result = calculateCircleLayout(nodes, { width, height })
+        result.positions.forEach((pos, nodeId) => {
+          positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+        })
+        setSwimlanes(new Map())
+        break
+      }
+
+      case 'grid': {
+        const result = calculateGridLayout(nodes, { width, height })
+        result.positions.forEach((pos, nodeId) => {
+          positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+        })
+        setSwimlanes(new Map())
+        break
+      }
+
+      case 'concentric': {
+        const result = calculateConcentricLayout(nodes, edges, { width, height })
+        result.positions.forEach((pos, nodeId) => {
+          positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+        })
+        setSwimlanes(new Map())
+        break
+      }
+
+      case 'preset':
+      case 'fcose':
+      case 'dagre':
+        // These would require additional libraries or custom implementation
+        // Fall back to random layout for now
+        {
+          const result = calculateRandomLayout(nodes, { width, height })
+          result.positions.forEach((pos, nodeId) => {
+            positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+          })
+          setSwimlanes(new Map())
+        }
+        break
+
+      default:
+        // Default circular layout
+        {
+          const result = calculateCircleLayout(nodes, { width, height })
+          result.positions.forEach((pos, nodeId) => {
+            positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+          })
+          setSwimlanes(new Map())
+        }
     }
 
     setNodePositions(positions)

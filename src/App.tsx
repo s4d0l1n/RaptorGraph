@@ -8,6 +8,7 @@ import { NodeDetailPanel } from '@/components/ui/NodeDetailPanel'
 import { CardTemplatePanel } from '@/components/ui/CardTemplatePanel'
 import { SearchFilterPanel } from '@/components/ui/SearchFilterPanel'
 import { RulesPanel } from '@/components/ui/RulesPanel'
+import { LayoutPanel } from '@/components/ui/LayoutPanel'
 import { G6Graph } from '@/components/graph/G6Graph'
 import { useUIStore } from '@/stores/uiStore'
 import { useGraphStore } from '@/stores/graphStore'
@@ -159,6 +160,7 @@ function App() {
       <CardTemplatePanel />
       <SearchFilterPanel />
       <RulesPanel />
+      <LayoutPanel />
     </div>
   )
 }
