@@ -33,6 +33,8 @@ export function G6Graph() {
   const [metaNodePositions, setMetaNodePositions] = useState<Map<string, NodePosition>>(new Map())
   const [swimlanes, setSwimlanes] = useState<Map<string, number>>(new Map())
   const animationRef = useRef<number>()
+  const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null)
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
 
   // Memoize visible nodes considering both filtering and grouping
   const visibleNodes = useMemo(() => {
@@ -59,8 +61,8 @@ export function G6Graph() {
     exportAsPNG(canvasRef.current, 'raptorgraph-export', 2)
   }, [exportAsPNG])
 
-  // Memoize click handler (handles both nodes and meta-nodes)
-  const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Mouse event handlers for dragging
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
     if (!canvas) return
 
@@ -68,28 +70,86 @@ export function G6Graph() {
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
 
-    // Check if click is on a meta-node (check these first, they're larger)
-    for (const [metaNodeId, pos] of metaNodePositions.entries()) {
+    // Check if mouse is over a node
+    for (const [nodeId, pos] of nodePositions.entries()) {
       const distance = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2)
-      if (distance < 50) { // Larger hit radius for meta-nodes
-        // Toggle collapse/expand
-        toggleMetaNodeCollapse(metaNodeId)
+      if (distance < 60) { // Hit radius for card nodes
+        setDraggedNodeId(nodeId)
+        setDragOffset({ x: x - pos.x, y: y - pos.y })
         return
       }
     }
+  }, [nodePositions])
 
-    // Check if click is on a regular node
-    let clickedNodeId: string | null = null
-    for (const [nodeId, pos] of nodePositions.entries()) {
-      const distance = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2)
-      if (distance < 30) {
-        clickedNodeId = nodeId
-        break
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!draggedNodeId) return
+
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const rect = canvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    // Update node position and trigger re-render
+    setNodePositions((prev) => {
+      const newPositions = new Map(prev)
+      const currentPos = newPositions.get(draggedNodeId)
+      if (currentPos) {
+        newPositions.set(draggedNodeId, {
+          ...currentPos,
+          x: x - dragOffset.x,
+          y: y - dragOffset.y,
+        })
+      }
+      return newPositions
+    })
+
+    // Request animation frame for smooth rendering during drag
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current)
+    }
+  }, [draggedNodeId, dragOffset])
+
+  const handleMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!draggedNodeId) return
+
+    // If no significant drag occurred, treat it as a click
+    const canvas = canvasRef.current
+    if (!canvas) {
+      setDraggedNodeId(null)
+      return
+    }
+
+    const rect = canvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    const pos = nodePositions.get(draggedNodeId)
+    if (pos) {
+      const dragDistance = Math.sqrt((x - pos.x - dragOffset.x) ** 2 + (y - pos.y - dragOffset.y) ** 2)
+
+      // If drag distance is small, treat as click
+      if (dragDistance < 5) {
+        // Check if click is on a meta-node first
+        let isMetaNodeClick = false
+        for (const [metaNodeId, metaPos] of metaNodePositions.entries()) {
+          const distance = Math.sqrt((x - metaPos.x) ** 2 + (y - metaPos.y) ** 2)
+          if (distance < 50) {
+            toggleMetaNodeCollapse(metaNodeId)
+            isMetaNodeClick = true
+            break
+          }
+        }
+
+        if (!isMetaNodeClick) {
+          setSelectedNodeId(draggedNodeId)
+        }
       }
     }
 
-    setSelectedNodeId(clickedNodeId)
-  }, [nodePositions, metaNodePositions, setSelectedNodeId, toggleMetaNodeCollapse])
+    setDraggedNodeId(null)
+  }, [draggedNodeId, nodePositions, dragOffset, metaNodePositions, setSelectedNodeId, toggleMetaNodeCollapse])
 
   // Initialize node positions with memoized layout calculation
   useEffect(() => {
@@ -556,9 +616,16 @@ export function G6Graph() {
     <div className="relative w-full h-full">
       <canvas
         ref={canvasRef}
-        className="w-full h-full cursor-pointer"
-        style={{ width: '100%', height: '100%' }}
-        onClick={handleCanvasClick}
+        className="w-full h-full"
+        style={{
+          width: '100%',
+          height: '100%',
+          cursor: draggedNodeId ? 'grabbing' : 'grab'
+        }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
       />
 
       {/* Node count indicator */}
