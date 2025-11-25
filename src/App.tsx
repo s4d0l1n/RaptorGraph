@@ -5,6 +5,7 @@ import { Toaster, toast } from '@/components/ui/Toast'
 import { UploadPanel } from '@/components/ui/UploadPanel'
 import { ColumnMapper } from '@/components/ui/ColumnMapper'
 import { NodeDetailPanel } from '@/components/ui/NodeDetailPanel'
+import { CardTemplatePanel } from '@/components/ui/CardTemplatePanel'
 import { G6Graph } from '@/components/graph/G6Graph'
 import { useUIStore } from '@/stores/uiStore'
 import { useGraphStore } from '@/stores/graphStore'
@@ -153,6 +154,7 @@ function App() {
       <UploadPanel />
       <ColumnMapper />
       <NodeDetailPanel />
+      <CardTemplatePanel />
     </div>
   )
 }
