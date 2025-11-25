@@ -3,6 +3,7 @@ import { X, AlertCircle, CheckCircle, ArrowRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
 import { useCSVStore } from '@/stores/csvStore'
+import { useDataProcessor } from '@/hooks/useDataProcessor'
 import { toast } from './Toast'
 import type { ColumnMapping, ColumnRole } from '@/types'
 
@@ -12,6 +13,7 @@ import type { ColumnMapping, ColumnRole } from '@/types'
 export function ColumnMapper() {
   const { activePanel, setActivePanel } = useUIStore()
   const { files, updateFileMapping, markFileAsProcessed } = useCSVStore()
+  const { processAllFiles } = useDataProcessor()
 
   // Get first unprocessed file
   const currentFile = files.find((f) => !f.processed)
@@ -127,7 +129,11 @@ export function ColumnMapper() {
     if (remainingFiles.length > 0) {
       toast.info(`${remainingFiles.length} more file(s) need mapping`)
     } else {
+      // All files processed, generate graph
       setActivePanel(null)
+      setTimeout(() => {
+        processAllFiles()
+      }, 100)
     }
   }
 
