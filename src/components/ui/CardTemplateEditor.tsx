@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { X, Plus, Trash2, GripVertical, Image as ImageIcon, Smile } from 'lucide-react'
+import { X, Plus, Trash2, GripVertical, Image as ImageIcon, Smile, ChevronDown, ChevronRight } from 'lucide-react'
 import { useGraphStore } from '@/stores/graphStore'
 import type { CardTemplate, AttributeDisplay, NodeShape } from '@/types'
 
@@ -68,6 +68,19 @@ export function CardTemplateEditor({ template, onClose, onSave }: CardTemplateEd
 
   // Icon picker state
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+
+  // Track which attributes have expanded styling options
+  const [expandedAttributes, setExpandedAttributes] = useState<Set<number>>(new Set())
+
+  const toggleAttributeExpanded = (index: number) => {
+    const newExpanded = new Set(expandedAttributes)
+    if (newExpanded.has(index)) {
+      newExpanded.delete(index)
+    } else {
+      newExpanded.add(index)
+    }
+    setExpandedAttributes(newExpanded)
+  }
 
   const handleSave = () => {
     if (!name.trim()) {
@@ -386,69 +399,170 @@ export function CardTemplateEditor({ template, onClose, onSave }: CardTemplateEd
               {attributeDisplays.map((attr, index) => (
                 <div
                   key={index}
-                  className="p-3 bg-dark border border-dark rounded flex items-center gap-3"
+                  className="bg-dark border border-dark rounded overflow-hidden"
                 >
-                  {/* Drag Handle */}
-                  <div className="flex flex-col gap-1">
-                    <button
-                      onClick={() => handleMoveAttribute(index, 'up')}
-                      disabled={index === 0}
-                      className="p-1 hover:bg-dark-secondary rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                  {/* Main Row */}
+                  <div className="p-3 flex items-center gap-3">
+                    {/* Drag Handle */}
+                    <div className="flex flex-col gap-1">
+                      <button
+                        onClick={() => handleMoveAttribute(index, 'up')}
+                        disabled={index === 0}
+                        className="p-1 hover:bg-dark-secondary rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <GripVertical className="w-4 h-4 rotate-90" />
+                      </button>
+                      <button
+                        onClick={() => handleMoveAttribute(index, 'down')}
+                        disabled={index === attributeDisplays.length - 1}
+                        className="p-1 hover:bg-dark-secondary rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <GripVertical className="w-4 h-4 -rotate-90" />
+                      </button>
+                    </div>
+
+                    {/* Visible Toggle */}
+                    <input
+                      type="checkbox"
+                      checked={attr.visible}
+                      onChange={(e) =>
+                        handleUpdateAttribute(index, { visible: e.target.checked })
+                      }
+                      className="w-4 h-4 cursor-pointer"
+                    />
+
+                    {/* Attribute Select */}
+                    <select
+                      value={attr.attributeName}
+                      onChange={(e) =>
+                        handleUpdateAttribute(index, { attributeName: e.target.value })
+                      }
+                      className="px-3 py-1 bg-dark-secondary border border-dark rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-cyber-500"
                     >
-                      <GripVertical className="w-4 h-4 rotate-90" />
+                      {availableAttributes.map((attrName) => (
+                        <option key={attrName} value={attrName}>
+                          {attrName}
+                        </option>
+                      ))}
+                    </select>
+
+                    {/* Display Label */}
+                    <input
+                      type="text"
+                      value={attr.displayLabel || ''}
+                      onChange={(e) =>
+                        handleUpdateAttribute(index, { displayLabel: e.target.value })
+                      }
+                      placeholder="Display label"
+                      className="flex-1 px-3 py-1 bg-dark-secondary border border-dark rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-cyber-500"
+                    />
+
+                    {/* Expand/Collapse Button */}
+                    <button
+                      onClick={() => toggleAttributeExpanded(index)}
+                      className="p-1 hover:bg-dark-secondary rounded transition-colors text-slate-400"
+                      title="Advanced styling"
+                    >
+                      {expandedAttributes.has(index) ? (
+                        <ChevronDown className="w-4 h-4" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4" />
+                      )}
                     </button>
+
+                    {/* Remove Button */}
                     <button
-                      onClick={() => handleMoveAttribute(index, 'down')}
-                      disabled={index === attributeDisplays.length - 1}
-                      className="p-1 hover:bg-dark-secondary rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                      onClick={() => handleRemoveAttribute(index)}
+                      className="p-1 hover:bg-red-500/20 text-red-400 rounded transition-colors"
                     >
-                      <GripVertical className="w-4 h-4 -rotate-90" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
 
-                  {/* Visible Toggle */}
-                  <input
-                    type="checkbox"
-                    checked={attr.visible}
-                    onChange={(e) =>
-                      handleUpdateAttribute(index, { visible: e.target.checked })
-                    }
-                    className="w-4 h-4 cursor-pointer"
-                  />
+                  {/* Advanced Styling Options */}
+                  {expandedAttributes.has(index) && (
+                    <div className="px-3 pb-3 pt-0 bg-dark-secondary/30 border-t border-dark space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        {/* Font Size */}
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">
+                            Font Size (px)
+                          </label>
+                          <input
+                            type="number"
+                            min="8"
+                            max="24"
+                            value={attr.fontSize || ''}
+                            onChange={(e) =>
+                              handleUpdateAttribute(index, {
+                                fontSize: e.target.value ? parseInt(e.target.value) : undefined,
+                              })
+                            }
+                            placeholder="Default"
+                            className="w-full px-2 py-1 bg-dark border border-dark-tertiary rounded text-slate-100 text-sm focus:outline-none focus:ring-1 focus:ring-cyber-500"
+                          />
+                        </div>
 
-                  {/* Attribute Select */}
-                  <select
-                    value={attr.attributeName}
-                    onChange={(e) =>
-                      handleUpdateAttribute(index, { attributeName: e.target.value })
-                    }
-                    className="px-3 py-1 bg-dark-secondary border border-dark rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-cyber-500"
-                  >
-                    {availableAttributes.map((attrName) => (
-                      <option key={attrName} value={attrName}>
-                        {attrName}
-                      </option>
-                    ))}
-                  </select>
+                        {/* Color */}
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">
+                            Color
+                          </label>
+                          <div className="flex gap-1">
+                            <input
+                              type="color"
+                              value={attr.color || '#e2e8f0'}
+                              onChange={(e) =>
+                                handleUpdateAttribute(index, { color: e.target.value })
+                              }
+                              className="w-10 h-8 rounded cursor-pointer border border-dark-tertiary"
+                            />
+                            <input
+                              type="text"
+                              value={attr.color || ''}
+                              onChange={(e) =>
+                                handleUpdateAttribute(index, { color: e.target.value })
+                              }
+                              placeholder="Default"
+                              className="flex-1 px-2 py-1 bg-dark border border-dark-tertiary rounded text-slate-100 text-sm focus:outline-none focus:ring-1 focus:ring-cyber-500"
+                            />
+                          </div>
+                        </div>
 
-                  {/* Display Label */}
-                  <input
-                    type="text"
-                    value={attr.displayLabel || ''}
-                    onChange={(e) =>
-                      handleUpdateAttribute(index, { displayLabel: e.target.value })
-                    }
-                    placeholder="Display label"
-                    className="flex-1 px-3 py-1 bg-dark-secondary border border-dark rounded text-slate-100 focus:outline-none focus:ring-2 focus:ring-cyber-500"
-                  />
+                        {/* Prefix */}
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">
+                            Prefix
+                          </label>
+                          <input
+                            type="text"
+                            value={attr.prefix || ''}
+                            onChange={(e) =>
+                              handleUpdateAttribute(index, { prefix: e.target.value })
+                            }
+                            placeholder="e.g., 🔍"
+                            className="w-full px-2 py-1 bg-dark border border-dark-tertiary rounded text-slate-100 text-sm focus:outline-none focus:ring-1 focus:ring-cyber-500"
+                          />
+                        </div>
 
-                  {/* Remove Button */}
-                  <button
-                    onClick={() => handleRemoveAttribute(index)}
-                    className="p-1 hover:bg-red-500/20 text-red-400 rounded transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                        {/* Suffix */}
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">
+                            Suffix
+                          </label>
+                          <input
+                            type="text"
+                            value={attr.suffix || ''}
+                            onChange={(e) =>
+                              handleUpdateAttribute(index, { suffix: e.target.value })
+                            }
+                            placeholder="e.g., ✓"
+                            className="w-full px-2 py-1 bg-dark border border-dark-tertiary rounded text-slate-100 text-sm focus:outline-none focus:ring-1 focus:ring-cyber-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

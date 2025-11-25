@@ -26,7 +26,7 @@ export function G6Graph() {
   const { nodes, edges } = useGraphStore()
   const { setSelectedNodeId, selectedNodeId, filteredNodeIds } = useUIStore()
   const { layoutConfig } = useProjectStore()
-  const { getEdgeTemplateById, getDefaultEdgeTemplate } = useTemplateStore()
+  const { getEdgeTemplateById, getDefaultEdgeTemplate, getCardTemplateById } = useTemplateStore()
   const { exportAsPNG } = useGraphExport()
   const [nodePositions, setNodePositions] = useState<Map<string, NodePosition>>(new Map())
   const [swimlanes, setSwimlanes] = useState<Map<string, number>>(new Map())
@@ -381,19 +381,73 @@ export function G6Graph() {
         const label = node.label.length > 15 ? node.label.substring(0, 15) + '...' : node.label
         ctx.fillText(label, pos.x, pos.y + 8)
 
-        // Draw attribute count if any
-        const attrCount = Object.keys(node.attributes).length
-        if (attrCount > 0) {
-          ctx.fillStyle = '#64748b'
-          ctx.font = '10px sans-serif'
-          ctx.fillText(`${attrCount} attrs`, pos.x, pos.y + 22)
+        // Get card template and render attributes if configured
+        const cardTemplate = node.cardTemplateId
+          ? getCardTemplateById(node.cardTemplateId)
+          : undefined
+
+        if (cardTemplate?.attributeDisplays && cardTemplate.attributeDisplays.length > 0) {
+          // Render attributes based on template configuration
+          const visibleAttrs = cardTemplate.attributeDisplays
+            .filter((attrDisplay) => attrDisplay.visible)
+            .sort((a, b) => a.order - b.order)
+
+          let yOffset = pos.y + 24
+          const maxAttrsToShow = 3 // Limit to prevent overflow
+
+          visibleAttrs.slice(0, maxAttrsToShow).forEach((attrDisplay) => {
+            // Get attribute value
+            let attrValue = ''
+            if (attrDisplay.attributeName === '__id__') {
+              attrValue = node.id
+            } else if (node.attributes[attrDisplay.attributeName]) {
+              const value = node.attributes[attrDisplay.attributeName]
+              attrValue = Array.isArray(value) ? value.join(', ') : value
+            }
+
+            if (attrValue) {
+              // Apply styling from attribute display configuration
+              const fontSize = attrDisplay.fontSize || 10
+              const color = attrDisplay.color || '#94a3b8'
+              const displayLabel = attrDisplay.displayLabel || attrDisplay.attributeName
+              const prefix = attrDisplay.prefix || ''
+              const suffix = attrDisplay.suffix || ''
+
+              // Build display text
+              const displayText = `${prefix}${displayLabel}: ${attrValue}${suffix}`
+              const truncatedText = displayText.length > 20 ? displayText.substring(0, 20) + '...' : displayText
+
+              ctx.fillStyle = color
+              ctx.font = `${fontSize}px sans-serif`
+              ctx.textAlign = 'center'
+              ctx.textBaseline = 'top'
+              ctx.fillText(truncatedText, pos.x, yOffset)
+
+              yOffset += fontSize + 4
+            }
+          })
+
+          // Show indicator if there are more attributes
+          if (visibleAttrs.length > maxAttrsToShow) {
+            ctx.fillStyle = '#64748b'
+            ctx.font = '9px sans-serif'
+            ctx.fillText(`+${visibleAttrs.length - maxAttrsToShow} more`, pos.x, yOffset)
+          }
+        } else {
+          // Fallback: Draw attribute count if no template
+          const attrCount = Object.keys(node.attributes).length
+          if (attrCount > 0) {
+            ctx.fillStyle = '#64748b'
+            ctx.font = '10px sans-serif'
+            ctx.fillText(`${attrCount} attrs`, pos.x, pos.y + 22)
+          }
         }
 
         // Draw stub indicator
         if (node.isStub) {
           ctx.fillStyle = '#94a3b8'
           ctx.font = '9px sans-serif'
-          ctx.fillText('STUB', pos.x, pos.y + 32)
+          ctx.fillText('STUB', pos.x, pos.y + (cardTemplate ? 60 : 32))
         }
       })
     }
