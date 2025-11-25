@@ -32,31 +32,59 @@ Transform your CSV data into powerful, interactive network graphs—completely o
 - Multi-value array matching support
 
 ### 🎨 **Rich Node Visualization**
-- Card-style nodes with icons and labels
+- Card-style nodes with customizable icons and colors
+- Custom card templates with emoji/image icons
 - Attribute count indicators
 - Stub node highlighting
-- Circular layout algorithm
+- Multiple layout algorithms (circle, grid, concentric, timeline, random)
 - Node selection and detail view
 
 ### 📈 **Advanced Graph Features**
-- Canvas-accelerated rendering
+- Canvas-accelerated rendering for high performance
 - Zoom, pan, and node selection
 - Click nodes to view detailed information
 - Connection statistics (in/out degree)
 - Navigate between connected nodes
+- Timeline layout with optional swimlanes
 
-### 💾 **Project Save/Load** (Coming Soon)
+### 🔍 **Search & Filter**
+- Fuzzy search across node IDs, labels, and attributes
+- Filter by tags with toggle buttons
+- Degree filtering (in/out/total connections)
+- Attribute-based filtering with dynamic values
+- Real-time filter results
+
+### 🎭 **Conditional Styling**
+- Rules engine with 10 operators (equals, contains, regex, exists, etc.)
+- Drag-to-reorder priority
+- Apply templates or add tags based on conditions
+- Real-time rule evaluation
+- Enable/disable individual rules
+
+### 💾 **Project Save/Load**
 - Save entire project as `.raptorjson` file
-- Includes all CSVs, mappings, nodes, edges, style rules
+- Includes all CSVs, mappings, nodes, edges, templates, style rules
 - Reload and continue work anytime
 - Share investigations with team
+- Version control friendly JSON format
+
+### ⌨️ **Keyboard Shortcuts**
+- Esc, Delete, Ctrl+S, Ctrl+O, Ctrl+F
+- Efficient navigation and control
+- Smart detection of input fields
+
+### 🐳 **Docker Deployment**
+- Multi-stage build for minimal image size
+- Nginx server with gzip compression and caching
+- Health checks and security headers
+- One-command deployment
 
 ### 🌙 **Beautiful Dark-Mode UI**
 - Dark mode by default with light mode toggle
 - Responsive design
 - Tailwind CSS styling
 - Lucide icons
-- Toast notifications
+- Toast notifications and loading states
 
 ---
 
@@ -232,6 +260,51 @@ When you set a column as "Link→Attribute":
 - Auto-creates **stub nodes** for unmatched values
 
 Stub nodes can be "promoted" when a later CSV provides full data.
+
+---
+
+## ⌨️ Keyboard Shortcuts
+
+RaptorGraph supports keyboard shortcuts for efficient navigation:
+
+| Shortcut | Action |
+|----------|--------|
+| `Esc` | Close active panel or clear node selection |
+| `Delete` / `Backspace` | Delete selected node (with confirmation) |
+| `Ctrl/Cmd + S` | Save project as .raptorjson |
+| `Ctrl/Cmd + O` | Open project file |
+| `Ctrl/Cmd + F` | Open search & filter panel |
+
+**Note**: Keyboard shortcuts are disabled when typing in input fields.
+
+---
+
+## 📦 Project File Format (.raptorjson)
+
+RaptorGraph projects are saved in a JSON format with the following structure:
+
+```json
+{
+  "version": "1.0.0",
+  "name": "Project Name",
+  "description": "Optional description",
+  "createdAt": 1234567890,
+  "modifiedAt": 1234567890,
+  "csvFiles": [...],          // Original CSV files with mappings
+  "nodes": [...],             // All graph nodes
+  "edges": [...],             // All graph edges
+  "cardTemplates": [...],     // Custom card templates
+  "edgeTemplates": [...],     // Custom edge templates
+  "styleRules": [...],        // Conditional styling rules
+  "layoutConfig": {...}       // Layout settings
+}
+```
+
+**Benefits**:
+- Complete state restoration
+- Share investigations with team
+- Version control friendly
+- Human-readable JSON format
 
 ---
 
