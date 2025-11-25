@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useGraphStore } from '@/stores/graphStore'
 import { useUIStore } from '@/stores/uiStore'
+import { useProjectStore } from '@/stores/projectStore'
+import { calculateTimelineLayout } from '@/lib/layouts/timelineLayout'
 
 interface NodePosition {
   x: number
@@ -16,7 +18,9 @@ export function G6Graph() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { nodes, edges } = useGraphStore()
   const { setSelectedNodeId, selectedNodeId } = useUIStore()
+  const { layoutConfig } = useProjectStore()
   const [nodePositions, setNodePositions] = useState<Map<string, NodePosition>>(new Map())
+  const [swimlanes, setSwimlanes] = useState<Map<string, number>>(new Map())
   const animationRef = useRef<number>()
 
   // Initialize node positions
@@ -27,22 +31,43 @@ export function G6Graph() {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    const centerX = canvas.offsetWidth / 2
-    const centerY = canvas.offsetHeight / 2
-    const radius = Math.min(canvas.offsetWidth, canvas.offsetHeight) / 3
+    const width = canvas.offsetWidth
+    const height = canvas.offsetHeight
 
-    nodes.forEach((node, i) => {
-      const angle = (i / nodes.length) * Math.PI * 2
-      positions.set(node.id, {
-        x: centerX + Math.cos(angle) * radius,
-        y: centerY + Math.sin(angle) * radius,
-        vx: 0,
-        vy: 0,
+    // Use timeline layout if configured
+    if (layoutConfig.type === 'timeline') {
+      const result = calculateTimelineLayout(nodes, {
+        width,
+        height,
+        swimlaneAttribute: layoutConfig.timelineSwimlaneAttribute,
       })
-    })
+
+      result.positions.forEach((pos, nodeId) => {
+        positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+      })
+
+      setSwimlanes(result.swimlanes)
+    } else {
+      // Default circular layout
+      const centerX = width / 2
+      const centerY = height / 2
+      const radius = Math.min(width, height) / 3
+
+      nodes.forEach((node, i) => {
+        const angle = (i / nodes.length) * Math.PI * 2
+        positions.set(node.id, {
+          x: centerX + Math.cos(angle) * radius,
+          y: centerY + Math.sin(angle) * radius,
+          vx: 0,
+          vy: 0,
+        })
+      })
+
+      setSwimlanes(new Map())
+    }
 
     setNodePositions(positions)
-  }, [nodes])
+  }, [nodes, layoutConfig])
 
   // Handle canvas click
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -82,6 +107,36 @@ export function G6Graph() {
       // Clear canvas
       ctx.fillStyle = '#0f172a'
       ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+      // Draw swimlanes if in timeline mode
+      if (swimlanes.size > 0) {
+        const sortedSwimlanes = Array.from(swimlanes.entries()).sort((a, b) => a[1] - b[1])
+
+        sortedSwimlanes.forEach(([label, yPos], i) => {
+          // Draw swimlane background
+          const swimlaneHeight = i < sortedSwimlanes.length - 1
+            ? sortedSwimlanes[i + 1][1] - yPos
+            : canvas.height - yPos
+
+          ctx.fillStyle = i % 2 === 0 ? '#1e293b' : '#0f172a'
+          ctx.fillRect(0, yPos - swimlaneHeight / 2, canvas.width, swimlaneHeight)
+
+          // Draw swimlane label
+          ctx.fillStyle = '#64748b'
+          ctx.font = '12px sans-serif'
+          ctx.textAlign = 'left'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(label, 10, yPos)
+
+          // Draw horizontal line
+          ctx.strokeStyle = '#334155'
+          ctx.lineWidth = 1
+          ctx.beginPath()
+          ctx.moveTo(0, yPos - swimlaneHeight / 2)
+          ctx.lineTo(canvas.width, yPos - swimlaneHeight / 2)
+          ctx.stroke()
+        })
+      }
 
       // Draw edges
       edges.forEach((edge) => {
