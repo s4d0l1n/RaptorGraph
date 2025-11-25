@@ -35,6 +35,10 @@ export function G6Graph() {
   const animationRef = useRef<number>()
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
+  const [zoom, setZoom] = useState(1)
+  const [isPanning, setIsPanning] = useState(false)
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 })
 
   // Memoize visible nodes considering both filtering and grouping
   const visibleNodes = useMemo(() => {
@@ -61,14 +65,22 @@ export function G6Graph() {
     exportAsPNG(canvasRef.current, 'raptorgraph-export', 2)
   }, [exportAsPNG])
 
-  // Mouse event handlers for dragging
+  // Mouse event handlers for dragging and panning
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
     if (!canvas) return
 
     const rect = canvas.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+    const x = (e.clientX - rect.left - panOffset.x) / zoom
+    const y = (e.clientY - rect.top - panOffset.y) / zoom
+
+    // If space key is pressed or middle mouse button, start panning
+    if (e.button === 1 || e.shiftKey) {
+      setIsPanning(true)
+      setPanStart({ x: e.clientX, y: e.clientY })
+      e.preventDefault()
+      return
+    }
 
     // Check if mouse is over a node
     for (const [nodeId, pos] of nodePositions.entries()) {
@@ -79,39 +91,63 @@ export function G6Graph() {
         return
       }
     }
-  }, [nodePositions])
+
+    // If not over a node, start panning
+    setIsPanning(true)
+    setPanStart({ x: e.clientX, y: e.clientY })
+  }, [nodePositions, panOffset, zoom])
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!draggedNodeId) return
-
     const canvas = canvasRef.current
     if (!canvas) return
 
     const rect = canvas.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
 
-    // Update node position and trigger re-render
-    setNodePositions((prev) => {
-      const newPositions = new Map(prev)
-      const currentPos = newPositions.get(draggedNodeId)
-      if (currentPos) {
-        newPositions.set(draggedNodeId, {
-          ...currentPos,
-          x: x - dragOffset.x,
-          y: y - dragOffset.y,
-        })
-      }
-      return newPositions
-    })
-
-    // Request animation frame for smooth rendering during drag
-    if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current)
+    // Handle panning
+    if (isPanning) {
+      const dx = e.clientX - panStart.x
+      const dy = e.clientY - panStart.y
+      setPanOffset((prev) => ({
+        x: prev.x + dx,
+        y: prev.y + dy,
+      }))
+      setPanStart({ x: e.clientX, y: e.clientY })
+      return
     }
-  }, [draggedNodeId, dragOffset])
+
+    // Handle node dragging
+    if (draggedNodeId) {
+      const x = (e.clientX - rect.left - panOffset.x) / zoom
+      const y = (e.clientY - rect.top - panOffset.y) / zoom
+
+      // Update node position and trigger re-render
+      setNodePositions((prev) => {
+        const newPositions = new Map(prev)
+        const currentPos = newPositions.get(draggedNodeId)
+        if (currentPos) {
+          newPositions.set(draggedNodeId, {
+            ...currentPos,
+            x: x - dragOffset.x,
+            y: y - dragOffset.y,
+          })
+        }
+        return newPositions
+      })
+
+      // Request animation frame for smooth rendering during drag
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current)
+      }
+    }
+  }, [draggedNodeId, dragOffset, isPanning, panStart, panOffset, zoom])
 
   const handleMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Stop panning
+    if (isPanning) {
+      setIsPanning(false)
+      return
+    }
+
     if (!draggedNodeId) return
 
     // If no significant drag occurred, treat it as a click
@@ -122,8 +158,8 @@ export function G6Graph() {
     }
 
     const rect = canvas.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+    const x = (e.clientX - rect.left - panOffset.x) / zoom
+    const y = (e.clientY - rect.top - panOffset.y) / zoom
 
     const pos = nodePositions.get(draggedNodeId)
     if (pos) {
@@ -149,7 +185,14 @@ export function G6Graph() {
     }
 
     setDraggedNodeId(null)
-  }, [draggedNodeId, nodePositions, dragOffset, metaNodePositions, setSelectedNodeId, toggleMetaNodeCollapse])
+  }, [draggedNodeId, nodePositions, dragOffset, metaNodePositions, setSelectedNodeId, toggleMetaNodeCollapse, isPanning, panOffset, zoom])
+
+  // Handle mouse wheel for zooming
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault()
+    const delta = -e.deltaY / 1000
+    setZoom((prev) => Math.max(0.1, Math.min(5, prev + delta)))
+  }, [])
 
   // Initialize node positions with memoized layout calculation
   useEffect(() => {
@@ -275,6 +318,11 @@ export function G6Graph() {
       // Clear canvas
       ctx.fillStyle = '#0f172a'
       ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+      // Save context and apply pan/zoom transformations
+      ctx.save()
+      ctx.translate(panOffset.x, panOffset.y)
+      ctx.scale(zoom, zoom)
 
       // Draw swimlanes if in timeline mode
       if (swimlanes.size > 0) {
@@ -426,19 +474,30 @@ export function G6Graph() {
         }
       })
 
-      // Draw meta-nodes (collapsed groups)
+      // Draw meta-nodes (collapsed groups) - showing contained nodes
       metaNodes.forEach((metaNode) => {
         if (!metaNode.collapsed) return // Only draw collapsed meta-nodes
 
         const pos = metaNodePositions.get(metaNode.id)
         if (!pos) return
 
-        const width = 100
-        const height = 80
+        // Get contained nodes
+        const containedNodes = nodes.filter((n) => metaNode.nodeIds.includes(n.id))
+
+        // Calculate size based on number of contained nodes
+        const nodeCount = containedNodes.length
+        const rows = Math.ceil(Math.sqrt(nodeCount))
+        const cols = Math.ceil(nodeCount / rows)
+        const miniNodeSize = 40
+        const spacing = 8
+        const padding = 20
+        const width = Math.max(150, cols * (miniNodeSize + spacing) + padding * 2)
+        const height = Math.max(120, rows * (miniNodeSize + spacing) + padding * 2 + 30) // Extra for header
+
         const radius = 12
 
-        // Draw background
-        ctx.fillStyle = '#1e40af' // Blue for groups
+        // Draw background with border
+        ctx.fillStyle = '#1e293b'
         ctx.strokeStyle = '#3b82f6'
         ctx.lineWidth = 3
 
@@ -460,17 +519,73 @@ export function G6Graph() {
         ctx.fill()
         ctx.stroke()
 
-        // Draw label
+        // Draw header with group label
+        ctx.fillStyle = '#1e40af'
+        ctx.fillRect(x, y, width, 30)
+
         ctx.fillStyle = '#fff'
         ctx.font = 'bold 12px sans-serif'
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
-        ctx.fillText(metaNode.label, pos.x, pos.y - 10)
+        ctx.fillText(`${metaNode.label} (${nodeCount})`, pos.x, y + 15)
 
-        // Draw expand icon
-        ctx.fillStyle = '#e2e8f0'
-        ctx.font = '10px sans-serif'
-        ctx.fillText('Click to expand', pos.x, pos.y + 15)
+        // Draw contained nodes as mini cards
+        const startX = x + padding
+        const startY = y + 30 + padding
+
+        containedNodes.forEach((node, idx) => {
+          const row = Math.floor(idx / cols)
+          const col = idx % cols
+          const nodeX = startX + col * (miniNodeSize + spacing)
+          const nodeY = startY + row * (miniNodeSize + spacing)
+
+          // Draw mini node card
+          ctx.fillStyle = node.isStub ? '#334155' : '#0f172a'
+          ctx.strokeStyle = node.isStub ? '#475569' : '#0891b2'
+          ctx.lineWidth = 1.5
+
+          const miniRadius = 4
+          ctx.beginPath()
+          ctx.moveTo(nodeX + miniRadius, nodeY)
+          ctx.lineTo(nodeX + miniNodeSize - miniRadius, nodeY)
+          ctx.quadraticCurveTo(nodeX + miniNodeSize, nodeY, nodeX + miniNodeSize, nodeY + miniRadius)
+          ctx.lineTo(nodeX + miniNodeSize, nodeY + miniNodeSize - miniRadius)
+          ctx.quadraticCurveTo(nodeX + miniNodeSize, nodeY + miniNodeSize, nodeX + miniNodeSize - miniRadius, nodeY + miniNodeSize)
+          ctx.lineTo(nodeX + miniRadius, nodeY + miniNodeSize)
+          ctx.quadraticCurveTo(nodeX, nodeY + miniNodeSize, nodeX, nodeY + miniNodeSize - miniRadius)
+          ctx.lineTo(nodeX, nodeY + miniRadius)
+          ctx.quadraticCurveTo(nodeX, nodeY, nodeX + miniRadius, nodeY)
+          ctx.closePath()
+          ctx.fill()
+          ctx.stroke()
+
+          // Draw mini icon
+          const iconSize = 10
+          const iconX = nodeX + miniNodeSize / 2
+          const iconY = nodeY + 12
+          ctx.fillStyle = node.isStub ? '#64748b' : '#06b6d4'
+          ctx.beginPath()
+          ctx.arc(iconX, iconY, iconSize, 0, Math.PI * 2)
+          ctx.fill()
+
+          ctx.fillStyle = '#fff'
+          ctx.font = 'bold 8px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(node.label.charAt(0).toUpperCase(), iconX, iconY)
+
+          // Draw mini label
+          ctx.fillStyle = '#e2e8f0'
+          ctx.font = '8px sans-serif'
+          const miniLabel = node.label.length > 6 ? node.label.substring(0, 6) + '.' : node.label
+          ctx.fillText(miniLabel, nodeX + miniNodeSize / 2, nodeY + miniNodeSize - 6)
+        })
+
+        // Draw expand icon at bottom
+        ctx.fillStyle = '#64748b'
+        ctx.font = '9px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText('Click to expand', pos.x, y + height - 10)
       })
 
       // Draw nodes as cards (only visible nodes)
@@ -600,6 +715,9 @@ export function G6Graph() {
           ctx.fillText('STUB', pos.x, pos.y + (cardTemplate ? 60 : 32))
         }
       })
+
+      // Restore context
+      ctx.restore()
     }
 
     // Render once when dependencies change
@@ -610,7 +728,7 @@ export function G6Graph() {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [nodes, edges, nodePositions, selectedNodeId, filteredNodeIds, visibleNodes, swimlanes, metaNodes, metaNodePositions])
+  }, [nodes, edges, nodePositions, selectedNodeId, filteredNodeIds, visibleNodes, swimlanes, metaNodes, metaNodePositions, panOffset, zoom])
 
   return (
     <div className="relative w-full h-full">
@@ -620,12 +738,13 @@ export function G6Graph() {
         style={{
           width: '100%',
           height: '100%',
-          cursor: draggedNodeId ? 'grabbing' : 'grab'
+          cursor: isPanning ? 'move' : draggedNodeId ? 'grabbing' : 'grab'
         }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
       />
 
       {/* Node count indicator */}
@@ -663,7 +782,25 @@ export function G6Graph() {
       )}
 
       {/* Graph Controls */}
-      <GraphControls />
+      <GraphControls
+        zoom={zoom}
+        onZoomIn={() => setZoom((prev) => Math.min(5, prev + 0.2))}
+        onZoomOut={() => setZoom((prev) => Math.max(0.1, prev - 0.2))}
+        onReset={() => {
+          setZoom(1)
+          setPanOffset({ x: 0, y: 0 })
+        }}
+      />
+
+      {/* Zoom indicator */}
+      {nodes.length > 0 && (
+        <div className="absolute bottom-6 left-6 px-3 py-2 bg-dark-secondary/90 border border-dark rounded-lg text-sm text-slate-300">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400">Zoom:</span>
+            <span className="font-medium">{(zoom * 100).toFixed(0)}%</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -671,12 +808,21 @@ export function G6Graph() {
 /**
  * Graph control buttons
  */
-function GraphControls() {
+interface GraphControlsProps {
+  zoom: number
+  onZoomIn: () => void
+  onZoomOut: () => void
+  onReset: () => void
+}
+
+function GraphControls({ zoom, onZoomIn, onZoomOut, onReset }: GraphControlsProps) {
   return (
     <div className="absolute bottom-6 right-6 flex flex-col gap-2">
       <button
-        className="w-10 h-10 bg-dark-secondary hover:bg-dark-tertiary border border-dark rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 transition-colors shadow-lg"
-        title="Zoom in (coming soon)"
+        onClick={onZoomIn}
+        disabled={zoom >= 5}
+        className="w-10 h-10 bg-dark-secondary hover:bg-dark-tertiary border border-dark rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+        title="Zoom in (scroll wheel or click)"
       >
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path
@@ -688,16 +834,19 @@ function GraphControls() {
         </svg>
       </button>
       <button
-        className="w-10 h-10 bg-dark-secondary hover:bg-dark-tertiary border border-dark rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 transition-colors shadow-lg"
-        title="Zoom out (coming soon)"
+        onClick={onZoomOut}
+        disabled={zoom <= 0.1}
+        className="w-10 h-10 bg-dark-secondary hover:bg-dark-tertiary border border-dark rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+        title="Zoom out (scroll wheel or click)"
       >
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
         </svg>
       </button>
       <button
+        onClick={onReset}
         className="w-10 h-10 bg-dark-secondary hover:bg-dark-tertiary border border-dark rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-200 transition-colors shadow-lg"
-        title="Fit to screen (coming soon)"
+        title="Reset view (zoom 100%, center)"
       >
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path

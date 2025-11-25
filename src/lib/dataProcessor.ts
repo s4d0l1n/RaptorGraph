@@ -73,6 +73,16 @@ export function processCSVFile(file: CSVFile): {
         }
       }
 
+      if (mapping.role === 'link_to' && mapping.columnName) {
+        const value = row[mapping.columnName]
+        if (value !== undefined && value !== null && value !== '') {
+          // Store link_to columns as attributes too
+          const parsedValues = parseMultiValue(String(value))
+          node.attributes[mapping.columnName] =
+            parsedValues.length === 1 ? parsedValues[0] : parsedValues
+        }
+      }
+
       if (mapping.role === 'timestamp' && mapping.attributeName) {
         const value = row[mapping.columnName]
         if (value) {
