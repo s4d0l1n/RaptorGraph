@@ -1,20 +1,29 @@
-import { useState, useEffect } from 'react'
+import { useEffect } from 'react'
 import { Header } from '@/components/layout/Header'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Toaster, toast } from '@/components/ui/Toast'
+import { useUIStore } from '@/stores/uiStore'
+import { useGraphStore } from '@/stores/graphStore'
 
 /**
  * RaptorGraph - Main Application Component
  * 100% offline, privacy-first DFIR graph analysis tool
  */
 function App() {
-  const [darkMode, setDarkMode] = useState(true)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [activePanel, setActivePanel] = useState<string | null>(null)
+  // Zustand stores
+  const {
+    darkMode,
+    sidebarCollapsed,
+    activePanel,
+    toggleDarkMode,
+    toggleSidebar,
+    setActivePanel,
+  } = useUIStore()
 
-  // Mock data for testing - will be replaced with real stores
-  const [nodeCount] = useState(0)
-  const [edgeCount] = useState(0)
+  const { nodes, edges } = useGraphStore()
+
+  const nodeCount = nodes.length
+  const edgeCount = edges.length
 
   useEffect(() => {
     // Ensure dark mode is applied
@@ -24,10 +33,6 @@ function App() {
       document.documentElement.classList.remove('dark')
     }
   }, [darkMode])
-
-  const handleToggleDarkMode = () => {
-    setDarkMode(!darkMode)
-  }
 
   const handleSave = () => {
     if (nodeCount === 0) return
@@ -59,7 +64,7 @@ function App() {
         nodeCount={nodeCount}
         edgeCount={edgeCount}
         darkMode={darkMode}
-        onToggleDarkMode={handleToggleDarkMode}
+        onToggleDarkMode={toggleDarkMode}
         onSave={handleSave}
         onLoad={handleLoad}
       />
@@ -69,7 +74,7 @@ function App() {
         {/* Sidebar */}
         <Sidebar
           collapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+          onToggleCollapse={toggleSidebar}
           activePanel={activePanel}
           onPanelChange={handlePanelChange}
           hasData={hasData}
