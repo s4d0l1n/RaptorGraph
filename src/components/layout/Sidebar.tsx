@@ -8,6 +8,7 @@ import {
   Grid3x3,
   Settings,
   ArrowRightLeft,
+  Layers2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -77,6 +78,13 @@ export function Sidebar({
       icon: <Grid3x3 className="w-5 h-5" />,
       label: 'Layout',
       onClick: () => onPanelChange('layout'),
+      disabled: !hasData,
+    },
+    {
+      id: 'grouping',
+      icon: <Layers2 className="w-5 h-5" />,
+      label: 'Grouping',
+      onClick: () => onPanelChange('grouping'),
       disabled: !hasData,
     },
     {

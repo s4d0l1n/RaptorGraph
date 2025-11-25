@@ -10,6 +10,7 @@ import { EdgeTemplatePanel } from '@/components/ui/EdgeTemplatePanel'
 import { SearchFilterPanel } from '@/components/ui/SearchFilterPanel'
 import { RulesPanel } from '@/components/ui/RulesPanel'
 import { LayoutPanel } from '@/components/ui/LayoutPanel'
+import { GroupingPanel } from '@/components/ui/GroupingPanel'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { G6Graph } from '@/components/graph/G6Graph'
 import { useUIStore } from '@/stores/uiStore'
@@ -168,6 +169,7 @@ function App() {
       <SearchFilterPanel />
       <RulesPanel />
       <LayoutPanel />
+      <GroupingPanel />
 
       {/* Global Loading Spinner */}
       <LoadingSpinner />

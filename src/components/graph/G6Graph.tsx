@@ -10,6 +10,7 @@ import { calculateCircleLayout } from '@/lib/layouts/circleLayout'
 import { calculateGridLayout } from '@/lib/layouts/gridLayout'
 import { calculateConcentricLayout } from '@/lib/layouts/concentricLayout'
 import { calculateRandomLayout } from '@/lib/layouts/randomLayout'
+import { getVisibleNodesWithGrouping, calculateMetaNodePosition } from '@/lib/grouping'
 
 interface NodePosition {
   x: number
@@ -23,20 +24,30 @@ interface NodePosition {
  */
 export function G6Graph() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const { nodes, edges } = useGraphStore()
+  const { nodes, edges, metaNodes, toggleMetaNodeCollapse } = useGraphStore()
   const { setSelectedNodeId, selectedNodeId, filteredNodeIds } = useUIStore()
   const { layoutConfig } = useProjectStore()
   const { getEdgeTemplateById, getDefaultEdgeTemplate, getCardTemplateById } = useTemplateStore()
   const { exportAsPNG } = useGraphExport()
   const [nodePositions, setNodePositions] = useState<Map<string, NodePosition>>(new Map())
+  const [metaNodePositions, setMetaNodePositions] = useState<Map<string, NodePosition>>(new Map())
   const [swimlanes, setSwimlanes] = useState<Map<string, number>>(new Map())
   const animationRef = useRef<number>()
 
-  // Memoize visible nodes to prevent unnecessary recalculations
+  // Memoize visible nodes considering both filtering and grouping
   const visibleNodes = useMemo(() => {
-    if (!filteredNodeIds) return nodes
-    return nodes.filter((node) => filteredNodeIds.has(node.id))
-  }, [nodes, filteredNodeIds])
+    // First apply filter
+    let filtered = filteredNodeIds
+      ? nodes.filter((node) => filteredNodeIds.has(node.id))
+      : nodes
+
+    // Then apply grouping (hide nodes inside collapsed meta-nodes)
+    if (metaNodes.length > 0) {
+      filtered = getVisibleNodesWithGrouping(filtered, metaNodes)
+    }
+
+    return filtered
+  }, [nodes, filteredNodeIds, metaNodes])
 
   // Memoize stub count to prevent recalculation on every render
   const stubCount = useMemo(() => {
@@ -48,7 +59,7 @@ export function G6Graph() {
     exportAsPNG(canvasRef.current, 'raptorgraph-export', 2)
   }, [exportAsPNG])
 
-  // Memoize click handler
+  // Memoize click handler (handles both nodes and meta-nodes)
   const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -57,7 +68,17 @@ export function G6Graph() {
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
 
-    // Check if click is on a node
+    // Check if click is on a meta-node (check these first, they're larger)
+    for (const [metaNodeId, pos] of metaNodePositions.entries()) {
+      const distance = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2)
+      if (distance < 50) { // Larger hit radius for meta-nodes
+        // Toggle collapse/expand
+        toggleMetaNodeCollapse(metaNodeId)
+        return
+      }
+    }
+
+    // Check if click is on a regular node
     let clickedNodeId: string | null = null
     for (const [nodeId, pos] of nodePositions.entries()) {
       const distance = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2)
@@ -68,7 +89,7 @@ export function G6Graph() {
     }
 
     setSelectedNodeId(clickedNodeId)
-  }, [nodePositions, setSelectedNodeId])
+  }, [nodePositions, metaNodePositions, setSelectedNodeId, toggleMetaNodeCollapse])
 
   // Initialize node positions with memoized layout calculation
   useEffect(() => {
@@ -150,6 +171,24 @@ export function G6Graph() {
 
     setNodePositions(positions)
   }, [nodes, edges, layoutConfig])
+
+  // Calculate meta-node positions after node positions are set
+  useEffect(() => {
+    if (metaNodes.length === 0 || nodePositions.size === 0) {
+      setMetaNodePositions(new Map())
+      return
+    }
+
+    const positions = new Map<string, NodePosition>()
+    metaNodes.forEach((metaNode) => {
+      const pos = calculateMetaNodePosition(metaNode, nodePositions)
+      if (pos) {
+        positions.set(metaNode.id, { ...pos, vx: 0, vy: 0 })
+      }
+    })
+
+    setMetaNodePositions(positions)
+  }, [metaNodes, nodePositions])
 
   // Render graph - optimized to only render when dependencies change
   useEffect(() => {
@@ -323,6 +362,53 @@ export function G6Graph() {
         }
       })
 
+      // Draw meta-nodes (collapsed groups)
+      metaNodes.forEach((metaNode) => {
+        if (!metaNode.collapsed) return // Only draw collapsed meta-nodes
+
+        const pos = metaNodePositions.get(metaNode.id)
+        if (!pos) return
+
+        const width = 100
+        const height = 80
+        const radius = 12
+
+        // Draw background
+        ctx.fillStyle = '#1e40af' // Blue for groups
+        ctx.strokeStyle = '#3b82f6'
+        ctx.lineWidth = 3
+
+        // Rounded rectangle
+        const x = pos.x - width / 2
+        const y = pos.y - height / 2
+
+        ctx.beginPath()
+        ctx.moveTo(x + radius, y)
+        ctx.lineTo(x + width - radius, y)
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius)
+        ctx.lineTo(x + width, y + height - radius)
+        ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height)
+        ctx.lineTo(x + radius, y + height)
+        ctx.quadraticCurveTo(x, y + height, x, y + height - radius)
+        ctx.lineTo(x, y + radius)
+        ctx.quadraticCurveTo(x, y, x + radius, y)
+        ctx.closePath()
+        ctx.fill()
+        ctx.stroke()
+
+        // Draw label
+        ctx.fillStyle = '#fff'
+        ctx.font = 'bold 12px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(metaNode.label, pos.x, pos.y - 10)
+
+        // Draw expand icon
+        ctx.fillStyle = '#e2e8f0'
+        ctx.font = '10px sans-serif'
+        ctx.fillText('Click to expand', pos.x, pos.y + 15)
+      })
+
       // Draw nodes as cards (only visible nodes)
       visibleNodes.forEach((node) => {
         const pos = nodePositions.get(node.id)
@@ -460,7 +546,7 @@ export function G6Graph() {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [nodes, edges, nodePositions, selectedNodeId, filteredNodeIds, visibleNodes, swimlanes])
+  }, [nodes, edges, nodePositions, selectedNodeId, filteredNodeIds, visibleNodes, swimlanes, metaNodes, metaNodePositions])
 
   return (
     <div className="relative w-full h-full">
