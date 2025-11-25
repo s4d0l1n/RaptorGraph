@@ -228,22 +228,22 @@ npm run lint     # Lint code
 
 ## 📝 Current Status
 
-### ✅ Completed Features (Tasks 1-9)
+### ✅ Completed Features (Tasks 1-11)
 
-- ✅ Initial project structure with TypeScript + Vite + Tailwind
-- ✅ Global layout (header, sidebar, toast system)
-- ✅ Complete Zustand store architecture
-- ✅ Drag & drop CSV upload with multi-file support
-- ✅ Column mapping wizard with auto-detection
-- ✅ Data processor with stub node creation
-- ✅ Canvas-based graph visualization
-- ✅ Rich card-style nodes with icons
-- ✅ Node detail panel with full information display
+- ✅ **Task 1**: Initial project structure with TypeScript + Vite + Tailwind
+- ✅ **Task 2**: Global layout (header, sidebar, toast system)
+- ✅ **Task 3**: Complete Zustand store architecture
+- ✅ **Task 4**: Drag & drop CSV upload with multi-file support
+- ✅ **Task 5**: Column mapping wizard with auto-detection
+- ✅ **Task 6**: Data processor with stub node creation
+- ✅ **Task 7**: Canvas-based graph visualization
+- ✅ **Task 8**: Rich card-style nodes with icons
+- ✅ **Task 9**: Node detail panel with full information display
+- ✅ **Task 10**: Timeline layout with swimlanes
+- ✅ **Task 11**: Full project save/load (.raptorjson format)
 
-### 🚧 Pending Features (Tasks 10-24)
+### 🚧 Pending Features (Tasks 12-24)
 
-- ⏳ Timeline layout with swimlanes
-- ⏳ Full project save/load (.raptorjson format)
 - ⏳ Card template editor (CRUD panel)
 - ⏳ Global search & filter
 - ⏳ Group-by meta-nodes with collapse/expand
