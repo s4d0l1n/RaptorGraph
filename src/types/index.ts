@@ -67,23 +67,43 @@ export interface MetaNode {
   groupValue: string
   /** IDs of nodes contained in this group */
   childNodeIds: string[]
+  /** IDs of meta-nodes contained in this group (for nested combinations) */
+  childMetaNodeIds?: string[]
   /** Whether the group is currently collapsed */
   collapsed: boolean
+  /** Layer level (0 = first layer, 1 = second layer, etc.) */
+  layer: number
   /** Position (inherited from layout) */
   x?: number
   y?: number
 }
 
 /**
- * Grouping configuration
+ * Combination layer configuration
+ */
+export interface CombinationLayer {
+  /** Unique identifier for this layer */
+  id: string
+  /** Attribute to combine by */
+  attribute: string
+  /** Whether to auto-collapse combinations in this layer */
+  autoCollapse: boolean
+  /** Display order */
+  order: number
+}
+
+/**
+ * Grouping configuration (supports multiple layers)
  */
 export interface GroupingConfig {
   /** Whether grouping is enabled */
   enabled: boolean
-  /** Attribute to group by */
+  /** Attribute to group by (legacy single-layer support) */
   groupByAttribute?: string
-  /** Whether to auto-collapse groups on creation */
+  /** Whether to auto-collapse groups on creation (legacy) */
   autoCollapse: boolean
+  /** Combination layers (for multi-layer combinations) */
+  layers?: CombinationLayer[]
 }
 
 // ============================================================================

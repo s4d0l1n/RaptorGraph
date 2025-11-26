@@ -1,10 +1,11 @@
 import { useState, useMemo } from 'react'
-import { X, Layers2 } from 'lucide-react'
+import { X, Layers2, Plus, Trash2, GripVertical } from 'lucide-react'
 import { useUIStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useGraphStore } from '@/stores/graphStore'
 import { generateMetaNodes } from '@/lib/grouping'
 import { toast } from './Toast'
+import type { CombinationLayer } from '@/types'
 
 /**
  * Node combination configuration panel
@@ -16,10 +17,25 @@ export function GroupingPanel() {
   const { nodes, setMetaNodes } = useGraphStore()
 
   const [enabled, setEnabled] = useState(groupingConfig.enabled)
-  const [groupByAttribute, setGroupByAttribute] = useState(
-    groupingConfig.groupByAttribute || ''
-  )
-  const [autoCollapse, setAutoCollapse] = useState(groupingConfig.autoCollapse)
+
+  // Initialize layers from config or create default
+  const [layers, setLayers] = useState<CombinationLayer[]>(() => {
+    if (groupingConfig.layers && groupingConfig.layers.length > 0) {
+      return groupingConfig.layers
+    }
+    // Legacy support: convert single attribute to layer
+    if (groupingConfig.groupByAttribute) {
+      return [
+        {
+          id: `layer-${Date.now()}`,
+          attribute: groupingConfig.groupByAttribute,
+          autoCollapse: groupingConfig.autoCollapse,
+          order: 0,
+        },
+      ]
+    }
+    return []
+  })
 
   const isOpen = activePanel === 'grouping'
 
@@ -38,27 +54,56 @@ export function GroupingPanel() {
     setActivePanel(null)
   }
 
+  const handleAddLayer = () => {
+    const newLayer: CombinationLayer = {
+      id: `layer-${Date.now()}`,
+      attribute: '',
+      autoCollapse: true,
+      order: layers.length,
+    }
+    setLayers([...layers, newLayer])
+  }
+
+  const handleRemoveLayer = (layerId: string) => {
+    const filtered = layers.filter((l) => l.id !== layerId)
+    // Reorder remaining layers
+    const reordered = filtered.map((l, idx) => ({ ...l, order: idx }))
+    setLayers(reordered)
+  }
+
+  const handleUpdateLayer = (layerId: string, updates: Partial<CombinationLayer>) => {
+    setLayers(layers.map((l) => (l.id === layerId ? { ...l, ...updates } : l)))
+  }
+
   const handleApplyGrouping = () => {
-    if (enabled && !groupByAttribute) {
-      toast.error('Please select an attribute to combine by')
+    if (enabled && layers.length === 0) {
+      toast.error('Please add at least one combination layer')
+      return
+    }
+
+    if (enabled && layers.some((l) => !l.attribute)) {
+      toast.error('Please select an attribute for all layers')
       return
     }
 
     const newConfig = {
       enabled,
-      groupByAttribute: enabled ? groupByAttribute : undefined,
-      autoCollapse,
+      layers: enabled ? layers : undefined,
+      // Keep legacy fields for backward compatibility
+      groupByAttribute: enabled && layers.length > 0 ? layers[0].attribute : undefined,
+      autoCollapse: enabled && layers.length > 0 ? layers[0].autoCollapse : true,
     }
 
     setGroupingConfig(newConfig)
 
     // Generate meta-nodes if enabled
-    if (enabled && groupByAttribute) {
+    if (enabled && layers.length > 0) {
       const metaNodes = generateMetaNodes(nodes, newConfig)
-      setMetaNodes(metaNodes)
+      const totalLayers = layers.length
       toast.success(
-        `Combined nodes: ${metaNodes.length} combination${metaNodes.length !== 1 ? 's' : ''} created`
+        `Combined nodes: ${metaNodes.length} combination${metaNodes.length !== 1 ? 's' : ''} created across ${totalLayers} layer${totalLayers !== 1 ? 's' : ''}`
       )
+      setMetaNodes(metaNodes)
     } else {
       setMetaNodes([])
       toast.success('Node combinations cleared')
@@ -68,15 +113,21 @@ export function GroupingPanel() {
   }
 
   const handlePreview = () => {
-    if (!enabled || !groupByAttribute) {
-      toast.error('Please enable combining and select an attribute')
+    if (!enabled || layers.length === 0) {
+      toast.error('Please enable combining and add at least one layer')
+      return
+    }
+
+    if (layers.some((l) => !l.attribute)) {
+      toast.error('Please select an attribute for all layers')
       return
     }
 
     const tempConfig = {
       enabled,
-      groupByAttribute,
-      autoCollapse,
+      layers,
+      groupByAttribute: layers[0].attribute,
+      autoCollapse: layers[0].autoCollapse,
     }
 
     const metaNodes = generateMetaNodes(nodes, tempConfig)
@@ -84,8 +135,9 @@ export function GroupingPanel() {
     if (metaNodes.length === 0) {
       toast.info('No combinations would be created (need 2+ nodes per combination)')
     } else {
+      const totalLayers = layers.length
       toast.info(
-        `Preview: ${metaNodes.length} combination${metaNodes.length !== 1 ? 's' : ''} would be created`
+        `Preview: ${metaNodes.length} combination${metaNodes.length !== 1 ? 's' : ''} across ${totalLayers} layer${totalLayers !== 1 ? 's' : ''}`
       )
     }
   }
@@ -120,7 +172,7 @@ export function GroupingPanel() {
                 <span className="font-semibold text-slate-100">Enable Combining</span>
               </div>
               <p className="text-sm text-slate-400">
-                Combine nodes with the same attribute value together
+                Combine nodes with the same attribute values into nested layers
               </p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
@@ -134,65 +186,103 @@ export function GroupingPanel() {
             </label>
           </div>
 
-          {/* Combine By Attribute */}
+          {/* Combination Layers */}
           {enabled && (
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-slate-300">
-                Combine By Attribute *
-              </label>
-              <select
-                value={groupByAttribute}
-                onChange={(e) => setGroupByAttribute(e.target.value)}
-                className="w-full px-3 py-2 bg-dark border border-dark-tertiary rounded-lg text-slate-100 focus:outline-none focus:ring-2 focus:ring-cyber-500"
-              >
-                <option value="">Select an attribute...</option>
-                {availableAttributes.map((attr) => (
-                  <option key={attr} value={attr}>
-                    {attr}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-slate-500">
-                Nodes with the same value for this attribute will be combined together
-              </p>
-            </div>
-          )}
-
-          {/* Auto-Collapse */}
-          {enabled && (
-            <div className="flex items-start gap-3 p-4 bg-dark border border-dark rounded-lg">
-              <input
-                type="checkbox"
-                id="autoCollapse"
-                checked={autoCollapse}
-                onChange={(e) => setAutoCollapse(e.target.checked)}
-                className="mt-1 w-4 h-4 cursor-pointer"
-              />
-              <div className="flex-1">
-                <label
-                  htmlFor="autoCollapse"
-                  className="font-medium text-slate-200 cursor-pointer"
-                >
-                  Auto-Collapse Combinations
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="block text-sm font-medium text-slate-300">
+                  Combination Layers
                 </label>
-                <p className="text-sm text-slate-400 mt-1">
-                  Automatically collapse combinations when created (can be expanded by clicking)
-                </p>
+                <button
+                  onClick={handleAddLayer}
+                  className="flex items-center gap-1 px-3 py-1 bg-cyber-500 hover:bg-cyber-600 text-white text-sm rounded transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Layer
+                </button>
               </div>
+
+              {layers.length === 0 && (
+                <div className="p-4 bg-dark border border-dark-tertiary rounded-lg text-center text-slate-400 text-sm">
+                  No layers defined. Click "Add Layer" to create your first combination layer.
+                </div>
+              )}
+
+              {layers.map((layer, index) => (
+                <div
+                  key={layer.id}
+                  className="p-4 bg-dark border border-dark-tertiary rounded-lg space-y-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <GripVertical className="w-4 h-4 text-slate-500" />
+                      <span className="font-medium text-slate-200">
+                        Layer {index + 1}
+                        {index === 0 && ' (Base)'}
+                        {index > 0 && ' (Nested)'}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => handleRemoveLayer(layer.id)}
+                      className="p-1 hover:bg-dark-secondary rounded transition-colors text-slate-400 hover:text-red-400"
+                      aria-label="Remove layer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-400 mb-1">
+                      Combine by attribute
+                    </label>
+                    <select
+                      value={layer.attribute}
+                      onChange={(e) =>
+                        handleUpdateLayer(layer.id, { attribute: e.target.value })
+                      }
+                      className="w-full px-3 py-2 bg-dark-secondary border border-dark rounded text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-cyber-500"
+                    >
+                      <option value="">Select an attribute...</option>
+                      {availableAttributes.map((attr) => (
+                        <option key={attr} value={attr}>
+                          {attr}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id={`collapse-${layer.id}`}
+                      checked={layer.autoCollapse}
+                      onChange={(e) =>
+                        handleUpdateLayer(layer.id, { autoCollapse: e.target.checked })
+                      }
+                      className="w-4 h-4 cursor-pointer"
+                    />
+                    <label
+                      htmlFor={`collapse-${layer.id}`}
+                      className="text-sm text-slate-300 cursor-pointer"
+                    >
+                      Auto-collapse this layer
+                    </label>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 
           {/* Info Box */}
           <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-            <div className="font-medium text-blue-400 mb-2">How Node Combining Works</div>
+            <div className="font-medium text-blue-400 mb-2">How Nested Combinations Work</div>
             <ul className="text-sm text-slate-300 space-y-1.5">
-              <li>• Nodes with the same attribute value are combined into container nodes</li>
-              <li>• Only combinations with 2+ nodes are created</li>
-              <li>• Click containers to expand/collapse and see contained nodes</li>
+              <li>• <strong>Layer 1 (Base):</strong> Nodes with matching attributes are combined</li>
+              <li>• <strong>Layer 2+ (Nested):</strong> Combines the combinations from previous layers</li>
+              <li>• Only combinations with 2+ items are created</li>
+              <li>• Click containers to expand/collapse and see contents</li>
               <li>• Edges are preserved and connect to/from containers</li>
-              <li>
-                • Multi-value attributes (arrays) create membership in multiple combinations
-              </li>
+              <li>• Example: Layer 1 by "department", Layer 2 by "location" groups departments by location</li>
             </ul>
           </div>
         </div>
@@ -201,7 +291,7 @@ export function GroupingPanel() {
         <div className="p-4 border-t border-dark bg-dark flex items-center justify-between">
           <button
             onClick={handlePreview}
-            disabled={!enabled || !groupByAttribute}
+            disabled={!enabled || layers.length === 0}
             className="px-4 py-2 bg-dark-tertiary hover:bg-slate-700 disabled:bg-dark disabled:text-slate-600 disabled:cursor-not-allowed text-slate-300 rounded-lg transition-colors"
           >
             Preview Combinations
