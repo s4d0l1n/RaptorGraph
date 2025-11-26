@@ -218,48 +218,21 @@ export function G6Graph() {
     const x = (e.clientX - rect.left - panOffset.x) / zoom
     const y = (e.clientY - rect.top - panOffset.y) / zoom
 
-    const pos = nodePositions.get(draggedNodeId)
+    // Check if draggedNodeId is a meta-node or regular node
+    const pos = nodePositions.get(draggedNodeId) || metaNodePositions.get(draggedNodeId)
     if (pos) {
       const dragDistance = Math.sqrt((x - pos.x - dragOffset.x) ** 2 + (y - pos.y - dragOffset.y) ** 2)
 
       // If drag distance is small, treat as click
       if (dragDistance < 5) {
-        // Check if click is on a meta-node first
-        let isMetaNodeClick = false
-        for (const [metaNodeId, metaPos] of metaNodePositions.entries()) {
-          const metaNode = metaNodes.find((mn) => mn.id === metaNodeId)
-          if (!metaNode || !metaNode.collapsed) continue
+        // Check if this is a meta-node click
+        const isMetaNodeId = metaNodePositions.has(draggedNodeId)
 
-          // Calculate meta-node bounding box
-          const nodeCount = metaNode.childNodeIds.length
-          const cols = Math.min(4, Math.ceil(Math.sqrt(nodeCount)))
-          const rows = Math.ceil(nodeCount / cols)
-          const cardWidth = 120
-          const cardHeight = 60
-          const spacing = 15
-          const padding = 25
-          const headerHeight = 35
-          const containerWidth = Math.max(200, cols * (cardWidth + spacing) - spacing + padding * 2)
-          const containerHeight = rows * (cardHeight + spacing) - spacing + padding * 2 + headerHeight
-
-          const containerX = metaPos.x - containerWidth / 2
-          const containerY = metaPos.y - containerHeight / 2
-
-          // Check if click is within bounding box
-          if (
-            x >= containerX &&
-            x <= containerX + containerWidth &&
-            y >= containerY &&
-            y <= containerY + containerHeight
-          ) {
-            // Select meta-node to show details of all contained nodes
-            setSelectedMetaNodeId(metaNodeId)
-            isMetaNodeClick = true
-            break
-          }
-        }
-
-        if (!isMetaNodeClick) {
+        if (isMetaNodeId) {
+          // Dragged a meta-node - select it
+          setSelectedMetaNodeId(draggedNodeId)
+        } else {
+          // Dragged a regular node - select it
           setSelectedNodeId(draggedNodeId)
         }
       }
