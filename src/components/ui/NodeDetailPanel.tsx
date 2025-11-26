@@ -1,22 +1,33 @@
-import { X, ExternalLink, Tag, Database, Clock, FileText } from 'lucide-react'
+import { X, ExternalLink, Tag, Database, Clock, FileText, Layers2, ChevronDown, ChevronUp } from 'lucide-react'
 import { useUIStore } from '@/stores/uiStore'
 import { useGraphStore } from '@/stores/graphStore'
 import { cn } from '@/lib/utils'
 import { format } from 'date-fns'
+import { useState } from 'react'
 
 /**
  * Node detail panel - slide-out from right showing node information
+ * Shows individual node details or all combined nodes when a meta-node is selected
  */
 export function NodeDetailPanel() {
-  const { selectedNodeId, setSelectedNodeId } = useUIStore()
-  const { nodes, getNodeById, getConnectedEdges } = useGraphStore()
+  const { selectedNodeId, selectedMetaNodeId, setSelectedNodeId, setSelectedMetaNodeId } = useUIStore()
+  const { nodes, getNodeById, getConnectedEdges, getMetaNodeById, toggleMetaNodeCollapse } = useGraphStore()
 
-  if (!selectedNodeId) return null
+  // Check if we're showing a meta-node or regular node
+  const isMetaNode = !!selectedMetaNodeId
+  const metaNode = selectedMetaNodeId ? getMetaNodeById(selectedMetaNodeId) : null
+  const node = selectedNodeId ? getNodeById(selectedNodeId) : null
 
-  const node = getNodeById(selectedNodeId)
-  if (!node) return null
+  if (!selectedNodeId && !selectedMetaNodeId) return null
+  if (!node && !metaNode) return null
 
-  const connectedEdges = getConnectedEdges(selectedNodeId)
+  // Get child nodes if this is a meta-node
+  const childNodes = metaNode
+    ? metaNode.childNodeIds.map((id) => getNodeById(id)).filter((n): n is NonNullable<typeof n> => n !== null)
+    : []
+
+  // For regular nodes, get connection info
+  const connectedEdges = node ? getConnectedEdges(selectedNodeId!) : []
   const inDegree = connectedEdges.filter((e) => e.target === selectedNodeId).length
   const outDegree = connectedEdges.filter((e) => e.source === selectedNodeId).length
 
@@ -30,21 +41,36 @@ export function NodeDetailPanel() {
     .map((id) => nodes.find((n) => n.id === id))
     .filter((n): n is typeof nodes[0] => n !== undefined)
 
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set())
+
   return (
     <div className="fixed inset-y-0 right-0 w-96 bg-dark-secondary border-l border-dark shadow-2xl z-40 overflow-hidden flex flex-col animate-slide-in-right">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-dark bg-dark-tertiary">
         <div className="flex items-center gap-2">
-          <div
-            className={cn(
-              'w-3 h-3 rounded-full',
-              node.isStub ? 'bg-slate-500' : 'bg-cyber-500'
-            )}
-          />
-          <h2 className="text-lg font-bold text-slate-100">Node Details</h2>
+          {isMetaNode ? (
+            <>
+              <Layers2 className="w-5 h-5 text-cyber-500" />
+              <h2 className="text-lg font-bold text-slate-100">Combined Nodes</h2>
+              <span className="text-sm text-slate-400">({childNodes.length})</span>
+            </>
+          ) : (
+            <>
+              <div
+                className={cn(
+                  'w-3 h-3 rounded-full',
+                  node!.isStub ? 'bg-slate-500' : 'bg-cyber-500'
+                )}
+              />
+              <h2 className="text-lg font-bold text-slate-100">Node Details</h2>
+            </>
+          )}
         </div>
         <button
-          onClick={() => setSelectedNodeId(null)}
+          onClick={() => {
+            setSelectedNodeId(null)
+            setSelectedMetaNodeId(null)
+          }}
           className="p-1.5 rounded-lg hover:bg-dark-secondary text-slate-400 hover:text-slate-200 transition-colors"
         >
           <X className="w-5 h-5" />
@@ -53,21 +79,138 @@ export function NodeDetailPanel() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        {/* Node ID and Label */}
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <ExternalLink className="w-4 h-4 text-slate-500" />
-            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wide">
-              Identifier
-            </h3>
-          </div>
-          <div className="p-3 bg-dark/50 rounded-lg border border-dark">
-            <p className="text-sm font-mono text-slate-200 break-all">{node.id}</p>
-            {node.label !== node.id && (
-              <p className="text-xs text-slate-400 mt-1">Label: {node.label}</p>
-            )}
-          </div>
-        </div>
+        {/* Meta-node info or regular node info */}
+        {isMetaNode && metaNode ? (
+          <>
+            {/* Meta-node header */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <Layers2 className="w-4 h-4 text-slate-500" />
+                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wide">
+                  Combination Info
+                </h3>
+              </div>
+              <div className="p-3 bg-dark/50 rounded-lg border border-dark space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-xs text-slate-500">Grouped by:</span>
+                  <span className="text-sm text-slate-200">{metaNode.groupByAttribute}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-xs text-slate-500">Value:</span>
+                  <span className="text-sm text-slate-200">{metaNode.groupValue}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-xs text-slate-500">Layer:</span>
+                  <span className="text-sm text-slate-200">
+                    {metaNode.layer + 1} {metaNode.layer === 0 ? '(Base)' : '(Nested)'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center pt-2 border-t border-dark">
+                  <span className="text-xs text-slate-500">Collapsed:</span>
+                  <button
+                    onClick={() => toggleMetaNodeCollapse(metaNode.id)}
+                    className="flex items-center gap-1 px-2 py-1 bg-cyber-500/20 hover:bg-cyber-500/30 border border-cyber-500/30 rounded text-xs text-cyber-400 transition-colors"
+                  >
+                    {metaNode.collapsed ? (
+                      <>
+                        <ChevronDown className="w-3 h-3" />
+                        Expand
+                      </>
+                    ) : (
+                      <>
+                        <ChevronUp className="w-3 h-3" />
+                        Collapse
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Child nodes list */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <Database className="w-4 h-4 text-slate-500" />
+                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wide">
+                  Contained Nodes
+                </h3>
+                <span className="text-xs text-slate-600">({childNodes.length})</span>
+              </div>
+              <div className="space-y-2">
+                {childNodes.map((childNode) => {
+                  const isExpanded = expandedNodes.has(childNode.id)
+                  return (
+                    <div
+                      key={childNode.id}
+                      className="p-3 bg-dark/50 rounded-lg border border-dark hover:border-slate-700 transition-colors"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <button
+                          onClick={() => setSelectedNodeId(childNode.id)}
+                          className="text-sm font-medium text-cyber-400 hover:text-cyber-300 transition-colors flex-1 text-left"
+                        >
+                          {childNode.label}
+                        </button>
+                        <button
+                          onClick={() => {
+                            const newExpanded = new Set(expandedNodes)
+                            if (isExpanded) {
+                              newExpanded.delete(childNode.id)
+                            } else {
+                              newExpanded.add(childNode.id)
+                            }
+                            setExpandedNodes(newExpanded)
+                          }}
+                          className="p-1 hover:bg-dark rounded transition-colors"
+                        >
+                          {isExpanded ? (
+                            <ChevronUp className="w-4 h-4 text-slate-400" />
+                          ) : (
+                            <ChevronDown className="w-4 h-4 text-slate-400" />
+                          )}
+                        </button>
+                      </div>
+                      {isExpanded && (
+                        <div className="space-y-1.5 mt-2 pt-2 border-t border-dark">
+                          <div className="text-xs text-slate-500 mb-1">ID: <span className="text-slate-300 font-mono">{childNode.id}</span></div>
+                          {Object.entries(childNode.attributes).slice(0, 5).map(([key, value]) => (
+                            <div key={key} className="text-xs">
+                              <span className="text-slate-500">{key}:</span>{' '}
+                              <span className="text-slate-300">
+                                {Array.isArray(value) ? value.join(', ') : String(value)}
+                              </span>
+                            </div>
+                          ))}
+                          {Object.keys(childNode.attributes).length > 5 && (
+                            <div className="text-xs text-slate-600 italic">
+                              +{Object.keys(childNode.attributes).length - 5} more attributes
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </>
+        ) : node ? (
+          <>
+            {/* Node ID and Label */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <ExternalLink className="w-4 h-4 text-slate-500" />
+                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wide">
+                  Identifier
+                </h3>
+              </div>
+              <div className="p-3 bg-dark/50 rounded-lg border border-dark">
+                <p className="text-sm font-mono text-slate-200 break-all">{node.id}</p>
+                {node.label !== node.id && (
+                  <p className="text-xs text-slate-400 mt-1">Label: {node.label}</p>
+                )}
+              </div>
+            </div>
 
         {/* Stub Indicator */}
         {node.isStub && (
@@ -239,6 +382,8 @@ export function NodeDetailPanel() {
             </div>
           )}
         </div>
+          </>
+        ) : null}
       </div>
     </div>
   )

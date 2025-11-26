@@ -49,11 +49,14 @@ function generateSingleLayerMetaNodes(
     // Handle multi-value attributes (arrays)
     if (Array.isArray(attrValue)) {
       attrValue.forEach((val) => {
-        const key = val || '(empty)'
-        if (!groups.has(key)) {
-          groups.set(key, [])
+        // Skip empty values
+        if (val && val !== '') {
+          const key = val
+          if (!groups.has(key)) {
+            groups.set(key, [])
+          }
+          groups.get(key)!.push(node)
         }
-        groups.get(key)!.push(node)
       })
     } else if (attrValue !== undefined && attrValue !== '') {
       const key = attrValue
@@ -61,14 +64,8 @@ function generateSingleLayerMetaNodes(
         groups.set(key, [])
       }
       groups.get(key)!.push(node)
-    } else {
-      // Nodes without the attribute go to "(ungrouped)"
-      const key = '(ungrouped)'
-      if (!groups.has(key)) {
-        groups.set(key, [])
-      }
-      groups.get(key)!.push(node)
     }
+    // Skip nodes without the attribute - don't create "(ungrouped)" combinations
   })
 
   // Create meta-nodes from groups
@@ -131,9 +128,11 @@ function generateNestedMetaNodes(
       if (!firstChild) return
 
       const attrValue = firstChild.attributes[currentLayer.attribute]
-      const key = Array.isArray(attrValue)
-        ? attrValue[0] || '(empty)'
-        : (attrValue || '(ungrouped)')
+
+      // Skip meta-nodes where children don't have the attribute
+      if (!attrValue || attrValue === '') return
+
+      const key = Array.isArray(attrValue) ? attrValue[0] : attrValue
 
       if (!groups.has(key)) {
         groups.set(key, [])

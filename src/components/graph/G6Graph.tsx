@@ -28,8 +28,8 @@ interface NodePosition {
  */
 export function G6Graph() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const { nodes, edges, metaNodes, toggleMetaNodeCollapse } = useGraphStore()
-  const { setSelectedNodeId, selectedNodeId, filteredNodeIds } = useUIStore()
+  const { nodes, edges, metaNodes } = useGraphStore()
+  const { setSelectedNodeId, setSelectedMetaNodeId, selectedNodeId, filteredNodeIds } = useUIStore()
   const { layoutConfig } = useProjectStore()
   const { getEdgeTemplateById, getDefaultEdgeTemplate, getCardTemplateById } = useTemplateStore()
   const { exportAsPNG } = useGraphExport()
@@ -206,7 +206,8 @@ export function G6Graph() {
         for (const [metaNodeId, metaPos] of metaNodePositions.entries()) {
           const distance = Math.sqrt((x - metaPos.x) ** 2 + (y - metaPos.y) ** 2)
           if (distance < 50) {
-            toggleMetaNodeCollapse(metaNodeId)
+            // Select meta-node to show details of all contained nodes
+            setSelectedMetaNodeId(metaNodeId)
             isMetaNodeClick = true
             break
           }
@@ -219,7 +220,7 @@ export function G6Graph() {
     }
 
     setDraggedNodeId(null)
-  }, [draggedNodeId, nodePositions, dragOffset, metaNodePositions, setSelectedNodeId, toggleMetaNodeCollapse, isPanning, panOffset, zoom])
+  }, [draggedNodeId, nodePositions, dragOffset, metaNodePositions, setSelectedNodeId, setSelectedMetaNodeId, isPanning, panOffset, zoom])
 
   // Handle mouse wheel for zooming
   const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {

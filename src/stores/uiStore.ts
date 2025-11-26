@@ -12,6 +12,7 @@ interface UIState {
 
   // Selection state
   selectedNodeId: string | null
+  selectedMetaNodeId: string | null
   selectedEdgeIds: string[]
 
   // Filter state
@@ -28,6 +29,7 @@ interface UIState {
   toggleSidebar: () => void
   setActivePanel: (panelId: string | null) => void
   setSelectedNodeId: (nodeId: string | null) => void
+  setSelectedMetaNodeId: (metaNodeId: string | null) => void
   setSelectedEdgeIds: (edgeIds: string[]) => void
   setFilteredNodeIds: (nodeIds: Set<string> | null) => void
   toggleDarkMode: () => void
@@ -40,6 +42,7 @@ export const useUIStore = create<UIState>((set) => ({
   sidebarCollapsed: false,
   activePanel: null,
   selectedNodeId: null,
+  selectedMetaNodeId: null,
   selectedEdgeIds: [],
   filteredNodeIds: null,
   darkMode: true,
@@ -54,7 +57,10 @@ export const useUIStore = create<UIState>((set) => ({
     set({ activePanel: panelId }),
 
   setSelectedNodeId: (nodeId) =>
-    set({ selectedNodeId: nodeId }),
+    set({ selectedNodeId: nodeId, selectedMetaNodeId: null }),
+
+  setSelectedMetaNodeId: (metaNodeId) =>
+    set({ selectedMetaNodeId: metaNodeId, selectedNodeId: null }),
 
   setSelectedEdgeIds: (edgeIds) =>
     set({ selectedEdgeIds: edgeIds }),
@@ -69,5 +75,5 @@ export const useUIStore = create<UIState>((set) => ({
     set({ isLoading, loadingMessage: message }),
 
   clearSelection: () =>
-    set({ selectedNodeId: null, selectedEdgeIds: [] }),
+    set({ selectedNodeId: null, selectedMetaNodeId: null, selectedEdgeIds: [] }),
 }))
