@@ -12,59 +12,66 @@ import type { ColumnMapping, ColumnRole } from '@/types'
  */
 export function ColumnMapper() {
   const { activePanel, setActivePanel } = useUIStore()
-  const { files, updateFileMapping, markFileAsProcessed } = useCSVStore()
+  const { files, currentMappingFileId, updateFileMapping, markFileAsProcessed, clearCurrentMappingFile } = useCSVStore()
   const { processAllFiles } = useDataProcessor()
 
-  // Get first unprocessed file
-  const currentFile = files.find((f) => !f.processed)
+  // Get current file being mapped (either explicitly selected or first unprocessed)
+  const currentFile = currentMappingFileId
+    ? files.find((f) => f.id === currentMappingFileId)
+    : files.find((f) => !f.processed)
 
   const [mappings, setMappings] = useState<ColumnMapping[]>([])
 
   useEffect(() => {
     if (currentFile) {
-      // Initialize mappings with auto-detection
-      const initialMappings = currentFile.parsed.headers.map((header) => {
-        const lowerHeader = header.toLowerCase()
+      // If file already has mapping, use it; otherwise initialize with auto-detection
+      if (currentFile.mapping && currentFile.mapping.length > 0) {
+        setMappings(currentFile.mapping)
+      } else {
+        // Initialize mappings with auto-detection
+        const initialMappings = currentFile.parsed.headers.map((header) => {
+          const lowerHeader = header.toLowerCase()
 
-        // Auto-detect node_id columns
-        if (
-          lowerHeader === 'id' ||
-          lowerHeader === 'node_id' ||
-          lowerHeader === 'nodeid' ||
-          lowerHeader === 'name' ||
-          lowerHeader === 'hostname' ||
-          lowerHeader === 'fqdn'
-        ) {
-          return {
-            columnName: header,
-            role: 'node_id' as ColumnRole,
+          // Auto-detect node_id columns
+          if (
+            lowerHeader === 'id' ||
+            lowerHeader === 'node_id' ||
+            lowerHeader === 'nodeid' ||
+            lowerHeader === 'name' ||
+            lowerHeader === 'hostname' ||
+            lowerHeader === 'fqdn'
+          ) {
+            return {
+              columnName: header,
+              role: 'node_id' as ColumnRole,
+            }
           }
-        }
 
-        // Auto-detect timestamp columns
-        if (
-          lowerHeader.includes('time') ||
-          lowerHeader.includes('date') ||
-          lowerHeader === 'timestamp' ||
-          lowerHeader === 'created' ||
-          lowerHeader === 'modified'
-        ) {
+          // Auto-detect timestamp columns
+          if (
+            lowerHeader.includes('time') ||
+            lowerHeader.includes('date') ||
+            lowerHeader === 'timestamp' ||
+            lowerHeader === 'created' ||
+            lowerHeader === 'modified'
+          ) {
+            return {
+              columnName: header,
+              role: 'timestamp' as ColumnRole,
+              attributeName: header,
+            }
+          }
+
+          // Default to attribute
           return {
             columnName: header,
-            role: 'timestamp' as ColumnRole,
+            role: 'attribute' as ColumnRole,
             attributeName: header,
           }
-        }
+        })
 
-        // Default to attribute
-        return {
-          columnName: header,
-          role: 'attribute' as ColumnRole,
-          attributeName: header,
-        }
-      })
-
-      setMappings(initialMappings)
+        setMappings(initialMappings)
+      }
     }
   }, [currentFile])
 
@@ -123,6 +130,9 @@ export function ColumnMapper() {
     markFileAsProcessed(currentFile.id)
 
     toast.success(`Mapping configured for ${currentFile.name}`)
+
+    // Clear current mapping file
+    clearCurrentMappingFile()
 
     // Close the mapper
     setActivePanel(null)

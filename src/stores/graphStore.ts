@@ -1,9 +1,11 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { GraphNode, GraphEdge, MetaNode } from '@/types'
 
 /**
  * Graph data store
  * Manages nodes, edges, and meta-nodes for the visualization
+ * Persists to localStorage to survive page refreshes
  */
 
 interface GraphState {
@@ -34,7 +36,9 @@ interface GraphState {
   getMetaNodeById: (metaNodeId: string) => MetaNode | undefined
 }
 
-export const useGraphStore = create<GraphState>((set, get) => ({
+export const useGraphStore = create<GraphState>()(
+  persist(
+    (set, get) => ({
   // Initial state
   nodes: [],
   edges: [],
@@ -143,4 +147,10 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   getMetaNodeById: (metaNodeId) =>
     get().metaNodes.find((mn) => mn.id === metaNodeId),
-}))
+    }),
+    {
+      name: 'raptorgraph-graph-storage',
+      version: 1,
+    }
+  )
+)

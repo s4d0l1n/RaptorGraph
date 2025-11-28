@@ -1,9 +1,11 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { StyleRule } from '@/types'
 
 /**
  * Style rules management store
  * Handles conditional styling rules with ordering
+ * Persists to localStorage to survive page refreshes
  */
 
 interface RulesState {
@@ -21,7 +23,9 @@ interface RulesState {
   clearAllRules: () => void
 }
 
-export const useRulesStore = create<RulesState>((set, get) => ({
+export const useRulesStore = create<RulesState>()(
+  persist(
+    (set, get) => ({
   // Initial state
   styleRules: [],
 
@@ -66,4 +70,10 @@ export const useRulesStore = create<RulesState>((set, get) => ({
 
   clearAllRules: () =>
     set({ styleRules: [] }),
-}))
+    }),
+    {
+      name: 'raptorgraph-rules-storage',
+      version: 1,
+    }
+  )
+)

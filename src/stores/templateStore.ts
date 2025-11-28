@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { CardTemplate, EdgeTemplate, FontTemplate } from '@/types'
 
 /**
@@ -43,7 +44,9 @@ interface TemplateState {
   clearAllTemplates: () => void
 }
 
-export const useTemplateStore = create<TemplateState>((set, get) => ({
+export const useTemplateStore = create<TemplateState>()(
+  persist(
+    (set, get) => ({
   // Initial state
   cardTemplates: [],
   edgeTemplates: [],
@@ -188,4 +191,10 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
       defaultEdgeTemplateId: null,
       defaultFontTemplateId: null,
     }),
-}))
+    }),
+    {
+      name: 'raptorgraph-template-storage',
+      version: 1,
+    }
+  )
+)

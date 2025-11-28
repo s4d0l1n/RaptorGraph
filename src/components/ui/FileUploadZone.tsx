@@ -1,9 +1,10 @@
 import { useCallback, useState } from 'react'
-import { Upload, File, X, AlertCircle } from 'lucide-react'
+import { Upload, File, X, AlertCircle, Settings } from 'lucide-react'
 import Papa from 'papaparse'
 import { v4 as uuidv4 } from 'uuid'
 import { cn } from '@/lib/utils'
 import { useCSVStore } from '@/stores/csvStore'
+import { useUIStore } from '@/stores/uiStore'
 import { toast } from './Toast'
 import type { CSVFile, ParsedCSV } from '@/types'
 
@@ -199,7 +200,13 @@ export function FileUploadZone() {
  * List of uploaded CSV files
  */
 function UploadedFilesList() {
-  const { files, removeFile } = useCSVStore()
+  const { files, removeFile, setFileForMapping } = useCSVStore()
+  const { setActivePanel } = useUIStore()
+
+  const handleConfigureMapping = (fileId: string) => {
+    setFileForMapping(fileId)
+    setActivePanel('column-mapper')
+  }
 
   return (
     <div className="space-y-2">
@@ -216,20 +223,29 @@ function UploadedFilesList() {
                 <p className="text-sm font-medium text-slate-200 truncate">{file.name}</p>
                 <p className="text-xs text-slate-500">
                   {file.parsed.rowCount} rows • {file.parsed.headers.length} columns
-                  {file.processed && ' • Processed'}
+                  {file.processed && ' • Mapped'}
                 </p>
               </div>
             </div>
-            <button
-              onClick={() => {
-                removeFile(file.id)
-                toast.info(`${file.name} removed`)
-              }}
-              className="p-1 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors"
-              title="Remove file"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleConfigureMapping(file.id)}
+                className="p-1.5 rounded hover:bg-cyber-500/20 text-slate-400 hover:text-cyber-400 transition-colors"
+                title={file.processed ? 'Reconfigure mapping' : 'Configure mapping'}
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => {
+                  removeFile(file.id)
+                  toast.info(`${file.name} removed`)
+                }}
+                className="p-1.5 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors"
+                title="Remove file"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         ))}
       </div>

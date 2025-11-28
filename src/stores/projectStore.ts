@@ -1,9 +1,11 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { LayoutConfig, GroupingConfig } from '@/types'
 
 /**
  * Project metadata and configuration store
  * Handles project-level settings, layout, and grouping configuration
+ * Persists to localStorage to survive page refreshes
  */
 
 interface ProjectState {
@@ -39,7 +41,9 @@ const DEFAULT_GROUPING_CONFIG: GroupingConfig = {
   autoCollapse: true,
 }
 
-export const useProjectStore = create<ProjectState>((set) => ({
+export const useProjectStore = create<ProjectState>()(
+  persist(
+    (set) => ({
   // Initial state
   projectName: 'Untitled Project',
   description: '',
@@ -75,4 +79,10 @@ export const useProjectStore = create<ProjectState>((set) => ({
       layoutConfig: DEFAULT_LAYOUT_CONFIG,
       groupingConfig: DEFAULT_GROUPING_CONFIG,
     }),
-}))
+    }),
+    {
+      name: 'raptorgraph-project-storage',
+      version: 1,
+    }
+  )
+)
