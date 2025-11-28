@@ -2,104 +2,183 @@
  * Style evaluator for applying conditional styling rules to nodes and edges
  */
 
-import type { StyleRule, RuleCondition, GraphNode, GraphEdge, ConditionOperator } from '@/types'
+import type { StyleRule, RuleCondition, GraphNode, GraphEdge, ConditionOperator, FontTemplateScope } from '@/types'
+
+/**
+ * Result of evaluating a condition, including which values matched
+ */
+interface ConditionEvaluationResult {
+  /** Whether the condition matched */
+  matches: boolean
+  /** The attribute that was tested */
+  attribute: string
+  /** For multi-value attributes, which specific values matched */
+  matchingValues?: string[]
+}
 
 /**
  * Evaluate a single condition against a node or edge
+ * Returns detailed information about what matched
  */
-function evaluateCondition(
+function evaluateConditionDetailed(
   condition: RuleCondition,
   attributes: Record<string, string | string[]>
-): boolean {
+): ConditionEvaluationResult {
   const { attribute, operator, value } = condition
   const attrValue = attributes[attribute]
 
+  const result: ConditionEvaluationResult = {
+    matches: false,
+    attribute,
+  }
+
   // Handle attribute existence operators
   if (operator === 'exists') {
-    return attrValue !== undefined
+    result.matches = attrValue !== undefined
+    return result
   }
   if (operator === 'not_exists') {
-    return attrValue === undefined
+    result.matches = attrValue === undefined
+    return result
   }
 
   // If attribute doesn't exist, fail all other operators
   if (attrValue === undefined) {
-    return false
+    return result
   }
 
   // Handle empty/not_empty operators
   if (operator === 'empty') {
     if (Array.isArray(attrValue)) {
-      return attrValue.length === 0
+      result.matches = attrValue.length === 0
+    } else {
+      result.matches = String(attrValue).trim() === ''
     }
-    return String(attrValue).trim() === ''
+    return result
   }
   if (operator === 'not_empty') {
     if (Array.isArray(attrValue)) {
-      return attrValue.length > 0
+      result.matches = attrValue.length > 0
+    } else {
+      result.matches = String(attrValue).trim() !== ''
     }
-    return String(attrValue).trim() !== ''
+    return result
   }
 
-  // Convert attribute value to string or array of strings
-  const attrValueStr = Array.isArray(attrValue)
-    ? attrValue.map((v) => String(v).toLowerCase())
-    : [String(attrValue).toLowerCase()]
-
+  // Get original values (preserve case) and lowercase versions for comparison
+  const originalValues = Array.isArray(attrValue) ? attrValue : [attrValue]
+  const attrValueStr = originalValues.map((v) => String(v).toLowerCase())
   const compareValue = value ? String(value).toLowerCase() : ''
+  const matchingIndices: number[] = []
 
-  // Evaluate operator
+  // Evaluate operator and track which values matched
   switch (operator) {
     case 'equals':
-      return attrValueStr.includes(compareValue)
+      attrValueStr.forEach((v, i) => {
+        if (v === compareValue) matchingIndices.push(i)
+      })
+      result.matches = matchingIndices.length > 0
+      break
 
     case 'not_equals':
-      return !attrValueStr.includes(compareValue)
+      attrValueStr.forEach((v, i) => {
+        if (v !== compareValue) matchingIndices.push(i)
+      })
+      result.matches = matchingIndices.length > 0
+      break
 
     case 'contains':
-      return attrValueStr.some((v) => v.includes(compareValue))
+      attrValueStr.forEach((v, i) => {
+        if (v.includes(compareValue)) matchingIndices.push(i)
+      })
+      result.matches = matchingIndices.length > 0
+      break
 
     case 'not_contains':
-      return !attrValueStr.some((v) => v.includes(compareValue))
+      attrValueStr.forEach((v, i) => {
+        if (!v.includes(compareValue)) matchingIndices.push(i)
+      })
+      result.matches = matchingIndices.length > 0
+      break
 
     case 'regex_match':
       try {
         const regex = new RegExp(compareValue, 'i')
-        return attrValueStr.some((v) => regex.test(v))
+        attrValueStr.forEach((v, i) => {
+          if (regex.test(v)) matchingIndices.push(i)
+        })
+        result.matches = matchingIndices.length > 0
       } catch {
-        return false
+        result.matches = false
       }
+      break
 
     case 'regex_not_match':
       try {
         const regex = new RegExp(compareValue, 'i')
-        return !attrValueStr.some((v) => regex.test(v))
+        attrValueStr.forEach((v, i) => {
+          if (!regex.test(v)) matchingIndices.push(i)
+        })
+        result.matches = matchingIndices.length > 0
       } catch {
-        return false
+        result.matches = false
       }
+      break
 
     default:
-      return false
+      result.matches = false
   }
+
+  // Store the original matching values (preserve case)
+  if (matchingIndices.length > 0) {
+    result.matchingValues = matchingIndices.map((i) => String(originalValues[i]))
+  }
+
+  return result
+}
+
+/**
+ * Simple boolean evaluation (backward compatibility)
+ */
+function evaluateCondition(
+  condition: RuleCondition,
+  attributes: Record<string, string | string[]>
+): boolean {
+  return evaluateConditionDetailed(condition, attributes).matches
+}
+
+/**
+ * Font template application with scope information
+ */
+export interface FontTemplateApplication {
+  /** Template ID to apply */
+  templateId: string
+  /** Scope of application */
+  scope: FontTemplateScope
+  /** Attribute name (for 'attribute' and 'value' scopes) */
+  attribute?: string
+  /** Specific values to style (for 'value' scope) */
+  values?: string[]
 }
 
 /**
  * Apply style rules to a node
- * Returns the IDs of templates/tags to apply
+ * Returns the IDs of templates/tags to apply with granular scoping
  */
 export function evaluateNodeRules(
   node: GraphNode,
   rules: StyleRule[]
 ): {
   cardTemplateId?: string
-  fontTemplateId?: string
+  fontTemplates: FontTemplateApplication[]
   additionalTags: string[]
 } {
   const result: {
     cardTemplateId?: string
-    fontTemplateId?: string
+    fontTemplates: FontTemplateApplication[]
     additionalTags: string[]
   } = {
+    fontTemplates: [],
     additionalTags: [],
   }
 
@@ -110,8 +189,10 @@ export function evaluateNodeRules(
       continue
     }
 
-    // Evaluate condition
-    if (evaluateCondition(rule.condition, node.attributes)) {
+    // Evaluate condition with detailed results
+    const evaluation = evaluateConditionDetailed(rule.condition, node.attributes)
+
+    if (evaluation.matches) {
       // Apply action
       if (rule.action === 'apply_card_template' && rule.actionParams.templateId) {
         // First matching template wins
@@ -119,10 +200,23 @@ export function evaluateNodeRules(
           result.cardTemplateId = rule.actionParams.templateId
         }
       } else if (rule.action === 'apply_font_template' && rule.actionParams.templateId) {
-        // First matching font template wins
-        if (!result.fontTemplateId) {
-          result.fontTemplateId = rule.actionParams.templateId
+        // Determine scope (default to 'attribute' for backward compatibility)
+        const scope = rule.actionParams.fontTemplateScope || 'attribute'
+
+        const application: FontTemplateApplication = {
+          templateId: rule.actionParams.templateId,
+          scope,
         }
+
+        // Add attribute and value information based on scope
+        if (scope === 'attribute' || scope === 'value') {
+          application.attribute = evaluation.attribute
+        }
+        if (scope === 'value' && evaluation.matchingValues) {
+          application.values = evaluation.matchingValues
+        }
+
+        result.fontTemplates.push(application)
       } else if (rule.action === 'add_tag' && rule.actionParams.tagName) {
         result.additionalTags.push(rule.actionParams.tagName)
       }

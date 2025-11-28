@@ -42,7 +42,7 @@ function App() {
   } = useUIStore()
 
   const { nodes, edges } = useGraphStore()
-  const { saveProject, handleLoadFile } = useProjectIO()
+  const { saveProject, handleLoadFile, clearProject } = useProjectIO()
 
   // Enable keyboard shortcuts
   useKeyboardShortcuts()
@@ -95,6 +95,7 @@ function App() {
         onToggleDarkMode={toggleDarkMode}
         onSave={handleSave}
         onLoad={handleLoad}
+        onNew={clearProject}
       />
 
       {/* Main Content Area */}

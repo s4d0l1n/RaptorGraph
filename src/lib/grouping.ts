@@ -133,54 +133,114 @@ function generateNestedMetaNodes(
   allMetaNodes.push(...layer0MetaNodes)
 
   // Subsequent layers: Combine meta-nodes from previous layer
+  // Key insight: Group only within each parent meta-node from two layers up
   for (let i = 1; i < sortedLayers.length; i++) {
     const currentLayer = sortedLayers[i]
     const previousLayerMetaNodes = allMetaNodes.filter((mn) => mn.layer === i - 1)
 
-    // Group previous layer meta-nodes by attribute
-    const groups = new Map<string, MetaNode[]>()
+    if (i === 1) {
+      // Layer 1: Group layer 0 meta-nodes globally
+      const groups = new Map<string, MetaNode[]>()
 
-    previousLayerMetaNodes.forEach((metaNode) => {
-      // Get attribute value from any child node
-      const firstChildId = metaNode.childNodeIds[0]
-      const firstChild = nodes.find((n) => n.id === firstChildId)
+      previousLayerMetaNodes.forEach((metaNode) => {
+        // Get attribute value from any child node
+        const firstChildId = metaNode.childNodeIds[0]
+        const firstChild = nodes.find((n) => n.id === firstChildId)
 
-      if (!firstChild) return
+        if (!firstChild) return
 
-      const attrValue = firstChild.attributes[currentLayer.attribute]
+        const attrValue = firstChild.attributes[currentLayer.attribute]
 
-      // Skip meta-nodes where children don't have the attribute
-      if (!attrValue || attrValue === '') return
+        // Skip meta-nodes where children don't have the attribute
+        if (!attrValue || attrValue === '') return
 
-      const key = Array.isArray(attrValue) ? attrValue[0] : attrValue
+        const key = Array.isArray(attrValue) ? attrValue[0] : attrValue
 
-      if (!groups.has(key)) {
-        groups.set(key, [])
-      }
-      groups.get(key)!.push(metaNode)
-    })
+        if (!groups.has(key)) {
+          groups.set(key, [])
+        }
+        groups.get(key)!.push(metaNode)
+      })
 
-    // Create meta-nodes from grouped meta-nodes
-    groups.forEach((groupMetaNodes, groupValue) => {
-      if (groupMetaNodes.length > 1) {
-        // Collect all child node IDs from all meta-nodes in this group
-        const allChildNodeIds = new Set<string>()
-        groupMetaNodes.forEach((mn) => {
-          mn.childNodeIds.forEach((id) => allChildNodeIds.add(id))
+      // Create meta-nodes from grouped meta-nodes
+      groups.forEach((groupMetaNodes, groupValue) => {
+        if (groupMetaNodes.length > 1) {
+          // Collect all child node IDs from all meta-nodes in this group
+          const allChildNodeIds = new Set<string>()
+          groupMetaNodes.forEach((mn) => {
+            mn.childNodeIds.forEach((id) => allChildNodeIds.add(id))
+          })
+
+          allMetaNodes.push({
+            id: `meta-L${i}-${currentLayer.attribute}-${groupValue}`,
+            label: `${groupValue} (${allChildNodeIds.size} nodes)`,
+            groupByAttribute: currentLayer.attribute,
+            groupValue,
+            childNodeIds: Array.from(allChildNodeIds),
+            childMetaNodeIds: groupMetaNodes.map((mn) => mn.id),
+            collapsed: currentLayer.autoCollapse,
+            layer: i,
+          })
+        }
+      })
+    } else {
+      // Layer 2+: Group only within each parent meta-node from layer i-2
+      const parentLayerMetaNodes = allMetaNodes.filter((mn) => mn.layer === i - 2)
+
+      parentLayerMetaNodes.forEach((parentMetaNode) => {
+        // Find children meta-nodes that belong to this parent
+        const childMetaNodesInParent = previousLayerMetaNodes.filter((childMN) =>
+          parentMetaNode.childMetaNodeIds?.includes(childMN.id)
+        )
+
+        if (childMetaNodesInParent.length === 0) return
+
+        // Group these children by the current layer's attribute
+        const groups = new Map<string, MetaNode[]>()
+
+        childMetaNodesInParent.forEach((metaNode) => {
+          // Get attribute value from any child node
+          const firstChildId = metaNode.childNodeIds[0]
+          const firstChild = nodes.find((n) => n.id === firstChildId)
+
+          if (!firstChild) return
+
+          const attrValue = firstChild.attributes[currentLayer.attribute]
+
+          // Skip meta-nodes where children don't have the attribute
+          if (!attrValue || attrValue === '') return
+
+          const key = Array.isArray(attrValue) ? attrValue[0] : attrValue
+
+          if (!groups.has(key)) {
+            groups.set(key, [])
+          }
+          groups.get(key)!.push(metaNode)
         })
 
-        allMetaNodes.push({
-          id: `meta-L${i}-${currentLayer.attribute}-${groupValue}`,
-          label: `${groupValue} (${allChildNodeIds.size} nodes)`,
-          groupByAttribute: currentLayer.attribute,
-          groupValue,
-          childNodeIds: Array.from(allChildNodeIds),
-          childMetaNodeIds: groupMetaNodes.map((mn) => mn.id),
-          collapsed: currentLayer.autoCollapse,
-          layer: i,
+        // Create meta-nodes from grouped meta-nodes within this parent
+        groups.forEach((groupMetaNodes, groupValue) => {
+          if (groupMetaNodes.length > 1) {
+            // Collect all child node IDs from all meta-nodes in this group
+            const allChildNodeIds = new Set<string>()
+            groupMetaNodes.forEach((mn) => {
+              mn.childNodeIds.forEach((id) => allChildNodeIds.add(id))
+            })
+
+            allMetaNodes.push({
+              id: `meta-L${i}-${parentMetaNode.id}-${currentLayer.attribute}-${groupValue}`,
+              label: `${groupValue} (${allChildNodeIds.size} nodes)`,
+              groupByAttribute: currentLayer.attribute,
+              groupValue,
+              childNodeIds: Array.from(allChildNodeIds),
+              childMetaNodeIds: groupMetaNodes.map((mn) => mn.id),
+              collapsed: currentLayer.autoCollapse,
+              layer: i,
+            })
+          }
         })
-      }
-    })
+      })
+    }
   }
 
   return allMetaNodes

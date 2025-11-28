@@ -47,6 +47,8 @@ export function G6Graph() {
   const { getEnabledRules } = useRulesStore()
   const [nodePositions, setNodePositions] = useState<Map<string, NodePosition>>(new Map())
   const [metaNodePositions, setMetaNodePositions] = useState<Map<string, NodePosition>>(new Map())
+  const [targetNodePositions, setTargetNodePositions] = useState<Map<string, { x: number; y: number }>>(new Map())
+  const [targetMetaNodePositions, setTargetMetaNodePositions] = useState<Map<string, { x: number; y: number }>>(new Map())
   const [swimlanes, setSwimlanes] = useState<Map<string, number>>(new Map())
   const animationRef = useRef<number>()
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null)
@@ -329,7 +331,7 @@ export function G6Graph() {
   useEffect(() => {
     if (nodes.length === 0) return
 
-    const positions = new Map<string, NodePosition>()
+    const targets = new Map<string, { x: number; y: number }>()
     const canvas = canvasRef.current
     if (!canvas) return
 
@@ -353,7 +355,7 @@ export function G6Graph() {
           edges: edges,
         })
         result.positions.forEach((pos, nodeId) => {
-          positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+          targets.set(nodeId, { x: pos.x, y: pos.y })
         })
         setSwimlanes(result.swimlanes)
         break
@@ -362,7 +364,7 @@ export function G6Graph() {
       case 'circle': {
         const result = calculateCircleLayout(nodes, { width, height })
         result.positions.forEach((pos, nodeId) => {
-          positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+          targets.set(nodeId, { x: pos.x, y: pos.y })
         })
         setSwimlanes(new Map())
         break
@@ -371,7 +373,7 @@ export function G6Graph() {
       case 'grid': {
         const result = calculateGridLayout(nodes, { width, height })
         result.positions.forEach((pos, nodeId) => {
-          positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+          targets.set(nodeId, { x: pos.x, y: pos.y })
         })
         setSwimlanes(new Map())
         break
@@ -380,7 +382,7 @@ export function G6Graph() {
       case 'concentric': {
         const result = calculateConcentricLayout(nodes, edges, { width, height })
         result.positions.forEach((pos, nodeId) => {
-          positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+          targets.set(nodeId, { x: pos.x, y: pos.y })
         })
         setSwimlanes(new Map())
         break
@@ -396,7 +398,7 @@ export function G6Graph() {
           centerGravity: 0.05,
         })
         result.positions.forEach((pos, nodeId) => {
-          positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+          targets.set(nodeId, { x: pos.x, y: pos.y })
         })
         setSwimlanes(new Map())
         break
@@ -411,7 +413,7 @@ export function G6Graph() {
           nodeSeparation: layoutConfig.hierarchicalNodeSeparation || 80,
         })
         result.positions.forEach((pos, nodeId) => {
-          positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+          targets.set(nodeId, { x: pos.x, y: pos.y })
         })
         setSwimlanes(new Map())
         break
@@ -425,7 +427,7 @@ export function G6Graph() {
           radiusStep: 150,
         })
         result.positions.forEach((pos, nodeId) => {
-          positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+          targets.set(nodeId, { x: pos.x, y: pos.y })
         })
         setSwimlanes(new Map())
         break
@@ -439,7 +441,7 @@ export function G6Graph() {
           temperature: 100,
         })
         result.positions.forEach((pos, nodeId) => {
-          positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+          targets.set(nodeId, { x: pos.x, y: pos.y })
         })
         setSwimlanes(new Map())
         break
@@ -455,7 +457,7 @@ export function G6Graph() {
           epsilon: 0.1,
         })
         result.positions.forEach((pos, nodeId) => {
-          positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+          targets.set(nodeId, { x: pos.x, y: pos.y })
         })
         setSwimlanes(new Map())
         break
@@ -467,7 +469,7 @@ export function G6Graph() {
           height,
         })
         result.positions.forEach((pos, nodeId) => {
-          positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+          targets.set(nodeId, { x: pos.x, y: pos.y })
         })
         setSwimlanes(new Map())
         break
@@ -485,7 +487,7 @@ export function G6Graph() {
             iterations: 150,
           })
           result.positions.forEach((pos, nodeId) => {
-            positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+            targets.set(nodeId, { x: pos.x, y: pos.y })
           })
           setSwimlanes(new Map())
         }
@@ -496,19 +498,36 @@ export function G6Graph() {
         {
           const result = calculateCircleLayout(nodes, { width, height })
           result.positions.forEach((pos, nodeId) => {
-            positions.set(nodeId, { ...pos, vx: 0, vy: 0 })
+            targets.set(nodeId, { x: pos.x, y: pos.y })
           })
           setSwimlanes(new Map())
         }
     }
 
-    setNodePositions(positions)
+    // Initialize node positions if they don't exist, or keep existing ones for animation
+    setNodePositions((prev) => {
+      const newPositions = new Map<string, NodePosition>()
+      targets.forEach((target, nodeId) => {
+        const existing = prev.get(nodeId)
+        if (existing) {
+          // Keep existing position for smooth animation
+          newPositions.set(nodeId, existing)
+        } else {
+          // New node - start at target position
+          newPositions.set(nodeId, { x: target.x, y: target.y, vx: 0, vy: 0 })
+        }
+      })
+      return newPositions
+    })
+
+    setTargetNodePositions(targets)
   }, [nodes, edges, layoutConfig])
 
   // Calculate meta-node positions after node positions are set
   useEffect(() => {
     if (metaNodes.length === 0 || nodePositions.size === 0) {
       setMetaNodePositions(new Map())
+      setTargetMetaNodePositions(new Map())
       setManuallyPositionedMetaNodes(new Set()) // Clear manual positioning when no meta-nodes
       return
     }
@@ -525,6 +544,25 @@ export function G6Graph() {
       return cleaned
     })
 
+    // Calculate target positions for meta-nodes
+    const targets = new Map<string, { x: number; y: number }>()
+
+    visibleMetaNodes.forEach((metaNode) => {
+      // Don't calculate target for manually positioned meta-nodes
+      if (manuallyPositionedMetaNodes.has(metaNode.id)) {
+        return
+      }
+
+      // Calculate position from child nodes
+      const pos = calculateMetaNodePosition(metaNode, nodePositions)
+      if (pos) {
+        targets.set(metaNode.id, pos)
+      }
+    })
+
+    setTargetMetaNodePositions(targets)
+
+    // Initialize or update meta-node positions
     setMetaNodePositions((prevPositions) => {
       const positions = new Map<string, NodePosition>()
 
@@ -539,10 +577,16 @@ export function G6Graph() {
           }
         }
 
-        // Calculate position from child nodes
-        const pos = calculateMetaNodePosition(metaNode, nodePositions)
-        if (pos) {
-          positions.set(metaNode.id, { ...pos, vx: 0, vy: 0 })
+        const target = targets.get(metaNode.id)
+        if (target) {
+          const existing = prevPositions.get(metaNode.id)
+          if (existing) {
+            // Keep existing position for smooth animation
+            positions.set(metaNode.id, existing)
+          } else {
+            // New meta-node - start at target position
+            positions.set(metaNode.id, { x: target.x, y: target.y, vx: 0, vy: 0 })
+          }
         }
       })
 
@@ -566,6 +610,121 @@ export function G6Graph() {
     const render = () => {
       // Update animation time for effects
       setAnimationTime((prev) => prev + 0.016) // Assuming ~60fps
+
+      // Physics-based animation: move nodes toward their targets
+      setNodePositions((prev) => {
+        const updated = new Map<string, NodePosition>()
+        let hasChanges = false
+
+        prev.forEach((pos, nodeId) => {
+          // Skip if being dragged
+          if (draggedNodeId === nodeId) {
+            updated.set(nodeId, pos)
+            return
+          }
+
+          const target = targetNodePositions.get(nodeId)
+          if (!target) {
+            updated.set(nodeId, pos)
+            return
+          }
+
+          // Calculate distance to target
+          const dx = target.x - pos.x
+          const dy = target.y - pos.y
+          const distance = Math.sqrt(dx * dx + dy * dy)
+
+          // If close enough, snap to target
+          if (distance < 0.5) {
+            updated.set(nodeId, { x: target.x, y: target.y, vx: 0, vy: 0 })
+            return
+          }
+
+          // Apply spring force toward target
+          const springStrength = 0.15 // How strongly nodes are pulled toward target
+          const damping = 0.7 // Velocity damping for smooth deceleration
+
+          // Calculate acceleration from spring force
+          const ax = dx * springStrength
+          const ay = dy * springStrength
+
+          // Update velocity with acceleration and damping
+          let vx = (pos.vx + ax) * damping
+          let vy = (pos.vy + ay) * damping
+
+          // Limit maximum velocity
+          const maxVelocity = 20
+          const speed = Math.sqrt(vx * vx + vy * vy)
+          if (speed > maxVelocity) {
+            vx = (vx / speed) * maxVelocity
+            vy = (vy / speed) * maxVelocity
+          }
+
+          // Update position
+          const newX = pos.x + vx
+          const newY = pos.y + vy
+
+          updated.set(nodeId, { x: newX, y: newY, vx, vy })
+          hasChanges = true
+        })
+
+        return updated
+      })
+
+      // Physics-based animation for meta-nodes
+      setMetaNodePositions((prev) => {
+        const updated = new Map<string, NodePosition>()
+
+        prev.forEach((pos, metaNodeId) => {
+          // Skip if being dragged or manually positioned
+          if (draggedNodeId === metaNodeId || manuallyPositionedMetaNodes.has(metaNodeId)) {
+            updated.set(metaNodeId, pos)
+            return
+          }
+
+          const target = targetMetaNodePositions.get(metaNodeId)
+          if (!target) {
+            updated.set(metaNodeId, pos)
+            return
+          }
+
+          // Calculate distance to target
+          const dx = target.x - pos.x
+          const dy = target.y - pos.y
+          const distance = Math.sqrt(dx * dx + dy * dy)
+
+          // If close enough, snap to target
+          if (distance < 0.5) {
+            updated.set(metaNodeId, { x: target.x, y: target.y, vx: 0, vy: 0 })
+            return
+          }
+
+          // Apply spring force toward target
+          const springStrength = 0.15
+          const damping = 0.7
+
+          const ax = dx * springStrength
+          const ay = dy * springStrength
+
+          let vx = (pos.vx + ax) * damping
+          let vy = (pos.vy + ay) * damping
+
+          // Limit maximum velocity
+          const maxVelocity = 20
+          const speed = Math.sqrt(vx * vx + vy * vy)
+          if (speed > maxVelocity) {
+            vx = (vx / speed) * maxVelocity
+            vy = (vy / speed) * maxVelocity
+          }
+
+          const newX = pos.x + vx
+          const newY = pos.y + vy
+
+          updated.set(metaNodeId, { x: newX, y: newY, vx, vy })
+        })
+
+        return updated
+      })
 
       // Set canvas size
       canvas.width = canvas.offsetWidth
@@ -1344,7 +1503,7 @@ export function G6Graph() {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [nodes, edges, nodePositions, selectedNodeId, filteredNodeIds, visibleNodes, swimlanes, metaNodes, visibleMetaNodes, metaNodePositions, panOffset, zoom, transformedEdges])
+  }, [nodes, edges, nodePositions, selectedNodeId, filteredNodeIds, visibleNodes, swimlanes, metaNodes, visibleMetaNodes, metaNodePositions, panOffset, zoom, transformedEdges, targetNodePositions, targetMetaNodePositions, draggedNodeId, manuallyPositionedMetaNodes])
 
   return (
     <div className="relative w-full h-full">

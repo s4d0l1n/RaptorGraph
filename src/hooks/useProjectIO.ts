@@ -110,9 +110,32 @@ export function useProjectIO() {
     input.click()
   }, [loadProject])
 
+  const clearProject = useCallback(() => {
+    const hasData = graphStore.nodes.length > 0 || csvStore.files.length > 0
+
+    if (hasData) {
+      const confirmed = window.confirm(
+        'Are you sure you want to create a new project? All unsaved changes will be lost.'
+      )
+      if (!confirmed) {
+        return
+      }
+    }
+
+    // Clear all stores
+    csvStore.clearAllFiles()
+    graphStore.clearGraph()
+    templateStore.clearAllTemplates()
+    rulesStore.clearAllRules()
+    projectStore.resetProject()
+
+    toast.success('New project created')
+  }, [csvStore, graphStore, templateStore, rulesStore, projectStore])
+
   return {
     saveProject,
     loadProject,
     handleLoadFile,
+    clearProject,
   }
 }

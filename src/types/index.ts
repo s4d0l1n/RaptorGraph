@@ -414,6 +414,14 @@ export interface RuleCondition {
 }
 
 /**
+ * Scope for font template application
+ */
+export type FontTemplateScope =
+  | 'node'           // Apply to all content in node detail
+  | 'attribute'      // Apply only to the matched attribute
+  | 'value'          // Apply only to the matched value(s) within attribute
+
+/**
  * Style rule for conditional formatting
  */
 export interface StyleRule {
@@ -435,6 +443,8 @@ export interface StyleRule {
   actionParams: {
     templateId?: string
     tagName?: string
+    /** Scope for font template application (only used with apply_font_template) */
+    fontTemplateScope?: FontTemplateScope
   }
   /** Creation timestamp */
   createdAt: number

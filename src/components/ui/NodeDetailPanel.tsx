@@ -3,7 +3,7 @@ import { useUIStore } from '@/stores/uiStore'
 import { useGraphStore } from '@/stores/graphStore'
 import { useRulesStore } from '@/stores/rulesStore'
 import { useTemplateStore } from '@/stores/templateStore'
-import { evaluateNodeRules } from '@/lib/styleEvaluator'
+import { evaluateNodeRules, type FontTemplateApplication } from '@/lib/styleEvaluator'
 import { cn } from '@/lib/utils'
 import { format } from 'date-fns'
 import { useState, useMemo } from 'react'
@@ -11,25 +11,45 @@ import type { FontTemplate } from '@/types'
 
 /**
  * Convert a FontTemplate to CSS style object
+ * Only applies properties that differ from defaults to allow partial styling
  */
 function fontTemplateToStyle(template: FontTemplate | undefined): React.CSSProperties {
   if (!template) return {}
 
-  return {
-    fontFamily: template.fontFamily,
-    fontSize: `${template.fontSize}rem`,
-    fontWeight: template.fontWeight,
-    fontStyle: template.fontStyle,
-    color: template.color,
-    backgroundColor: template.backgroundColor || 'transparent',
-    textDecoration: template.textDecoration,
-    textTransform: template.textTransform,
-    textShadow: template.textShadow?.enabled
-      ? `${template.textShadow.offsetX}px ${template.textShadow.offsetY}px ${template.textShadow.blur}px ${template.textShadow.color}`
-      : 'none',
-    padding: template.backgroundColor ? '0.25rem 0.5rem' : undefined,
-    borderRadius: template.backgroundColor ? '0.25rem' : undefined,
+  const style: React.CSSProperties = {}
+
+  // Only apply properties that are explicitly set (not default values)
+  if (template.fontFamily && template.fontFamily !== 'Inter') {
+    style.fontFamily = template.fontFamily
   }
+  if (template.fontSize && template.fontSize !== 1) {
+    style.fontSize = `${template.fontSize}rem`
+  }
+  if (template.fontWeight && template.fontWeight !== 'normal') {
+    style.fontWeight = template.fontWeight
+  }
+  if (template.fontStyle && template.fontStyle !== 'normal') {
+    style.fontStyle = template.fontStyle
+  }
+  if (template.color) {
+    style.color = template.color
+  }
+  if (template.backgroundColor) {
+    style.backgroundColor = template.backgroundColor
+    style.padding = '0.25rem 0.5rem'
+    style.borderRadius = '0.25rem'
+  }
+  if (template.textDecoration && template.textDecoration !== 'none') {
+    style.textDecoration = template.textDecoration
+  }
+  if (template.textTransform && template.textTransform !== 'none') {
+    style.textTransform = template.textTransform
+  }
+  if (template.textShadow?.enabled) {
+    style.textShadow = `${template.textShadow.offsetX}px ${template.textShadow.offsetY}px ${template.textShadow.blur}px ${template.textShadow.color}`
+  }
+
+  return style
 }
 
 /**
@@ -51,15 +71,70 @@ export function NodeDetailPanel() {
   const metaNode = selectedMetaNodeId ? getMetaNodeById(selectedMetaNodeId) : null
   const node = selectedNodeId ? getNodeById(selectedNodeId) : null
 
-  // Evaluate rules to get font template for the node
-  const appliedFontTemplate = useMemo<FontTemplate | undefined>(() => {
-    if (!node) return undefined
+  // Evaluate rules to get font templates with granular scoping
+  const fontTemplateApplications = useMemo<FontTemplateApplication[]>(() => {
+    if (!node) return []
     const evaluation = evaluateNodeRules(node, styleRules)
-    if (evaluation.fontTemplateId) {
-      return getFontTemplateById(evaluation.fontTemplateId)
+    return evaluation.fontTemplates
+  }, [node, styleRules])
+
+  // Helper function to get style for a specific attribute
+  const getAttributeStyle = (attributeName: string): React.CSSProperties => {
+    // Find font templates that apply to this attribute
+    for (const app of fontTemplateApplications) {
+      if (app.scope === 'node') {
+        // Node-level styling applies to everything
+        const template = getFontTemplateById(app.templateId)
+        if (template) return fontTemplateToStyle(template)
+      } else if (app.scope === 'attribute' && app.attribute === attributeName) {
+        // Attribute-level styling
+        const template = getFontTemplateById(app.templateId)
+        if (template) return fontTemplateToStyle(template)
+      }
     }
-    return undefined
-  }, [node, styleRules, getFontTemplateById])
+    return {}
+  }
+
+  // Helper function to get style for a specific value within an attribute
+  const getValueStyle = (attributeName: string, value: string): React.CSSProperties => {
+    let resultStyle: React.CSSProperties = {}
+
+    // Find font templates that apply to this specific value
+    // Apply in priority order: node -> attribute -> value (value is most specific)
+    for (const app of fontTemplateApplications) {
+      if (app.scope === 'node') {
+        // Node-level styling applies to everything (lowest priority)
+        const template = getFontTemplateById(app.templateId)
+        if (template) {
+          resultStyle = { ...resultStyle, ...fontTemplateToStyle(template) }
+        }
+      }
+    }
+
+    for (const app of fontTemplateApplications) {
+      if (app.scope === 'attribute' && app.attribute === attributeName) {
+        // Attribute-level styling (medium priority)
+        const template = getFontTemplateById(app.templateId)
+        if (template) {
+          resultStyle = { ...resultStyle, ...fontTemplateToStyle(template) }
+        }
+      }
+    }
+
+    for (const app of fontTemplateApplications) {
+      if (app.scope === 'value' && app.attribute === attributeName) {
+        // Value-level styling (highest priority) - only apply if this value matches
+        if (app.values?.includes(String(value))) {
+          const template = getFontTemplateById(app.templateId)
+          if (template) {
+            resultStyle = { ...resultStyle, ...fontTemplateToStyle(template) }
+          }
+        }
+      }
+    }
+
+    return resultStyle
+  }
 
   if (!selectedNodeId && !selectedMetaNodeId) return null
   if (!node && !metaNode) return null
@@ -267,14 +342,14 @@ export function NodeDetailPanel() {
               <div className="p-3 bg-dark/50 rounded-lg border border-dark">
                 <p
                   className="text-sm font-mono break-all"
-                  style={appliedFontTemplate ? fontTemplateToStyle(appliedFontTemplate) : { color: 'rgb(226 232 240)' }}
+                  style={{ color: 'rgb(226 232 240)', ...getAttributeStyle('__id__') }}
                 >
                   {node.id}
                 </p>
                 {node.label !== node.id && (
                   <p
                     className="text-xs mt-1"
-                    style={appliedFontTemplate ? fontTemplateToStyle(appliedFontTemplate) : { color: 'rgb(148 163 184)' }}
+                    style={{ color: 'rgb(148 163 184)' }}
                   >
                     Label: {node.label}
                   </p>
@@ -309,7 +384,7 @@ export function NodeDetailPanel() {
                 <span
                   key={tag}
                   className="px-2 py-1 bg-cyber-500/20 border border-cyber-500/30 rounded text-xs"
-                  style={appliedFontTemplate ? fontTemplateToStyle(appliedFontTemplate) : { color: 'rgb(103 232 249)' }}
+                  style={{ color: 'rgb(103 232 249)', ...getValueStyle('tags', tag) }}
                 >
                   {tag}
                 </span>
@@ -343,21 +418,21 @@ export function NodeDetailPanel() {
                   </div>
                   <div className="mt-1">
                     {Array.isArray(value) ? (
-                      <div className="flex flex-wrap gap-1 mt-1">
+                      <div className="space-y-0.5">
                         {value.map((v, i) => (
-                          <span
+                          <div
                             key={i}
-                            className="px-2 py-0.5 bg-slate-700 rounded text-xs"
-                            style={appliedFontTemplate ? fontTemplateToStyle(appliedFontTemplate) : undefined}
+                            className="text-sm break-all"
+                            style={{ color: 'rgb(226 232 240)', ...getValueStyle(key, String(v)) }}
                           >
                             {v}
-                          </span>
+                          </div>
                         ))}
                       </div>
                     ) : (
                       <p
                         className="text-sm break-all font-mono"
-                        style={appliedFontTemplate ? fontTemplateToStyle(appliedFontTemplate) : { color: 'rgb(226 232 240)' }}
+                        style={{ color: 'rgb(226 232 240)', ...getAttributeStyle(key) }}
                       >
                         {String(value)}
                       </p>
