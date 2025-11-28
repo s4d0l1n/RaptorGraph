@@ -1,8 +1,8 @@
 # 🦖 RaptorGraph
 
-**Privacy-First, 100% Offline DFIR Graph Analysis Tool**
+**Privacy-First, 100% Offline Graph Visualization Tool**
 
-Transform your CSV data into powerful, interactive network graphs—completely offline, zero backend, open source. Perfect for DFIR investigations, threat hunting, network analysis, and security research.
+Transform your CSV data into powerful, interactive network graphs—completely offline, zero backend, open source. Perfect for data analysis, network visualization, relationship mapping, and research projects of any kind.
 
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue)](https://www.typescriptlang.org/)
@@ -17,7 +17,7 @@ Transform your CSV data into powerful, interactive network graphs—completely o
 - All processing happens in your browser
 - No data ever leaves your machine
 - Works completely offline after initial load
-- Perfect for sensitive security investigations
+- Perfect for sensitive or private data analysis
 
 ### 📊 **Powerful CSV Import**
 - Drag & drop multiple CSV files
@@ -113,8 +113,8 @@ Transform your CSV data into powerful, interactive network graphs—completely o
 
 ```bash
 # Clone the repository
-git clone https://github.com/s4d0l1n/Protoceratop.git
-cd Protoceratop
+git clone https://github.com/s4d0l1n/RaptorGraph.git
+cd RaptorGraph
 
 # Install dependencies
 npm install
@@ -130,8 +130,8 @@ npm run build
 
 ```bash
 # Clone the repository
-git clone https://github.com/s4d0l1n/Protoceratop.git
-cd Protoceratop
+git clone https://github.com/s4d0l1n/RaptorGraph.git
+cd RaptorGraph
 
 # Option 1: Using Docker Compose (Recommended)
 docker-compose up -d
@@ -167,16 +167,16 @@ open http://localhost:8080
 
 ---
 
-## 📖 Example Use Case
+## 📖 Example Use Cases
 
-### Network Investigation Scenario
+### Network Devices Scenario
 
-Upload `network_devices.csv`:
+Upload `devices.csv`:
 ```csv
 Hostname,IP,Gateway,Type,Tags
-web-01,10.0.1.10,10.0.1.1,webserver,"production,dmz"
-db-01,10.0.2.20,10.0.2.1,database,"production,sensitive"
-fw-01,10.0.1.1,10.0.0.1,firewall,"infrastructure"
+server-01,10.0.1.10,10.0.1.1,webserver,"production,frontend"
+database-01,10.0.2.20,10.0.2.1,database,"production,backend"
+router-01,10.0.1.1,10.0.0.1,router,"infrastructure,core"
 ```
 
 **Column Mapping**:
@@ -191,6 +191,16 @@ fw-01,10.0.1.1,10.0.0.1,firewall,"infrastructure"
 - Edges connecting devices to their gateways
 - Stub nodes auto-created for gateways not in CSV
 - Rich detail view showing all attributes and connections
+
+### Other Use Cases
+
+- **Organizational Charts**: Map employees, departments, and reporting structures
+- **Project Dependencies**: Visualize task dependencies and project relationships
+- **Social Networks**: Analyze connections between people or entities
+- **Supply Chain**: Track product flow and vendor relationships
+- **Knowledge Graphs**: Map concepts and their relationships
+- **Citation Networks**: Visualize research paper citations
+- **Infrastructure Mapping**: Document system dependencies and data flows
 
 ---
 
@@ -399,9 +409,9 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 
 ## 💬 Support
 
-- **Issues**: [GitHub Issues](https://github.com/s4d0l1n/Protoceratop/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/s4d0l1n/Protoceratop/discussions)
+- **Issues**: [GitHub Issues](https://github.com/s4d0l1n/RaptorGraph/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/s4d0l1n/RaptorGraph/discussions)
 
 ---
 
-**Built for DFIR and security professionals with ❤️ by the open source community**
+**Built with ❤️ for data analysts, researchers, and anyone who needs to visualize complex relationships**

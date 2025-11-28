@@ -119,7 +119,7 @@ function App() {
                   Welcome to RaptorGraph
                 </h2>
                 <p className="text-lg text-slate-400 mb-8">
-                  Your privacy-first, 100% offline graph analysis tool for DFIR investigations.
+                  Transform your CSV data into beautiful, interactive network graphs—100% offline and private.
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
                   <div className="p-6 bg-dark-secondary rounded-lg border border-dark">
