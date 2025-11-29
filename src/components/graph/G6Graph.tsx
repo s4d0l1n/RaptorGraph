@@ -16,6 +16,7 @@ import { calculateFruchtermanLayout } from '@/lib/layouts/fruchtermanLayout'
 import { calculateKamadaKawaiLayout } from '@/lib/layouts/kamadaKawaiLayout'
 import { calculateSpectralLayout } from '@/lib/layouts/spectralLayout'
 import { calculateSugiyamaLayout } from '@/lib/layouts/sugiyamaLayout'
+import { calculateClusterIslandLayout } from '@/lib/layouts/clusterIslandLayout'
 import { getVisibleNodesWithGrouping, calculateMetaNodePosition, transformEdgesForGrouping } from '@/lib/grouping'
 import { evaluateNodeRules, evaluateEdgeRules } from '@/lib/styleEvaluator'
 import { useRulesStore } from '@/stores/rulesStore'
@@ -359,26 +360,61 @@ export function G6Graph() {
     const width = canvas.offsetWidth
     const height = canvas.offsetHeight
 
-    // NO LAYOUT ALGORITHMS - just initialize random positions
-    // Physics will handle everything in the render loop
+    // CLUSTER ISLAND LAYOUT: Use two-tier physics to create distinct cluster islands
+    // This replaces random initialization with intelligent cluster-based positioning
 
     setNodePositions((prev) => {
       const newPositions = new Map<string, NodePosition>()
-      nodes.forEach((node) => {
-        const existing = prev.get(node.id)
-        if (existing) {
-          // Keep existing position
-          newPositions.set(node.id, existing)
-        } else {
-          // New node - random initial position
-          newPositions.set(node.id, {
-            x: width / 2 + (Math.random() - 0.5) * 400,
-            y: height / 2 + (Math.random() - 0.5) * 400,
+
+      // Check if we have existing positions (e.g., from previous layout)
+      const hasExistingPositions = prev.size > 0
+
+      if (hasExistingPositions) {
+        // Keep existing positions for nodes that haven't changed
+        nodes.forEach((node) => {
+          const existing = prev.get(node.id)
+          if (existing) {
+            newPositions.set(node.id, existing)
+          }
+        })
+
+        // Only calculate layout for new nodes
+        const newNodes = nodes.filter(node => !prev.has(node.id))
+        if (newNodes.length > 0) {
+          // Add new nodes near cluster centroids
+          newNodes.forEach((node) => {
+            newPositions.set(node.id, {
+              x: width / 2 + (Math.random() - 0.5) * 200,
+              y: height / 2 + (Math.random() - 0.5) * 200,
+              vx: 0,
+              vy: 0,
+            })
+          })
+        }
+      } else {
+        // First time initialization - use cluster island layout
+        const layoutResult = calculateClusterIslandLayout(nodes, edges, {
+          width,
+          height,
+          iterations: 300,
+          intraClusterAttraction: 0.05,
+          intraClusterRepulsion: 3000,
+          leafRadialForce: 0.3,
+          interClusterRepulsion: 50000,
+          minClusterDistance: 400,
+          centerGravity: 0.01,
+        })
+
+        layoutResult.positions.forEach((pos, nodeId) => {
+          newPositions.set(nodeId, {
+            x: pos.x,
+            y: pos.y,
             vx: 0,
             vy: 0,
           })
-        }
-      })
+        })
+      }
+
       return newPositions
     })
 
@@ -456,9 +492,13 @@ export function G6Graph() {
     })
   }, [metaNodes, visibleMetaNodes, nodePositions, manuallyPositionedMetaNodes])
 
-  // Track simulation state
+  // Track simulation state - FOUR PHASES
   const [iterationCount, setIterationCount] = useState(0)
   const maxIterations = 500
+  const phase1Iterations = 250  // Explosion phase - push clusters apart
+  const phase2Iterations = 100  // Leaf retraction - pull leaves closer
+  const phase3Iterations = 100  // Non-overlap enforcement phase
+  const phase4Iterations = 50   // Final leaf snap - ultra-tight leaf positioning
 
   // Render graph - optimized to only render when dependencies change
   useEffect(() => {
@@ -497,13 +537,17 @@ export function G6Graph() {
         const nodeRadius = 60
         const minDistance = nodeRadius * 2.5
 
-        // Stop simulation after convergence
+        // FOUR-PHASE LAYOUT APPROACH:
+        // Phase 1 (0-250): Explosion - push clusters apart, leaves spread with parents
+        // Phase 2 (250-350): Leaf retraction - pull leaves closer to parents
+        // Phase 3 (350-450): Non-overlap enforcement - create clean spacing
+        // Phase 4 (450-500): Final leaf snap - ultra-tight leaf positioning, creating hallways
+
         if (iterationCount >= maxIterations) {
-          // If user is dragging, apply spring physics to connected nodes
+          // After all phases complete, only handle dragging
           if (draggedNodeId) {
             const updated = new Map<string, NodePosition>()
             prev.forEach((pos, id) => updated.set(id, { ...pos }))
-
             const draggedPos = prev.get(draggedNodeId)
             if (draggedPos) {
               const connectedNodes = adjacency.get(draggedNodeId) || new Set()
@@ -540,40 +584,56 @@ export function G6Graph() {
                 }
               })
 
-              // OVERLAP PREVENTION during drag
-              const maxPasses = 3
+              // OVERLAP PREVENTION during drag - check ALL nodes (dragged + connected) against ALL other nodes
+              const movingNodeIds = new Set([draggedNodeId, ...Array.from(connectedNodes)])
+              const maxPasses = 5
+
               for (let pass = 0; pass < maxPasses; pass++) {
-                // Check connected nodes against all other nodes
-                connectedNodes.forEach(nodeId1 => {
+                let hadOverlap = false
+
+                // Check all moving nodes against all other nodes
+                movingNodeIds.forEach(nodeId1 => {
                   const pos1 = updated.get(nodeId1)
                   if (!pos1) return
 
                   updated.forEach((pos2, nodeId2) => {
-                    // Skip self and dragged node
-                    if (nodeId1 === nodeId2 || nodeId2 === draggedNodeId) return
+                    // Skip self comparisons
+                    if (nodeId1 === nodeId2) return
 
                     const dx = pos2.x - pos1.x
                     const dy = pos2.y - pos1.y
                     const dist = Math.sqrt(dx * dx + dy * dy)
 
                     if (dist < minDistance && dist > 0) {
+                      hadOverlap = true
                       const overlap = minDistance - dist
                       const pushDist = overlap / 2
                       const nx = dx / dist
                       const ny = dy / dist
 
-                      // Push apart
-                      pos1.x -= nx * pushDist
-                      pos1.y -= ny * pushDist
+                      // If node1 is moving (dragged or connected), push it
+                      if (movingNodeIds.has(nodeId1) && nodeId1 !== draggedNodeId) {
+                        pos1.x -= nx * pushDist
+                        pos1.y -= ny * pushDist
+                      }
 
-                      // Also push the other node if it's connected
-                      if (connectedNodes.has(nodeId2)) {
+                      // If node2 is also moving, push it too
+                      if (movingNodeIds.has(nodeId2) && nodeId2 !== draggedNodeId) {
                         pos2.x += nx * pushDist
                         pos2.y += ny * pushDist
+                      }
+
+                      // If node2 is NOT moving, push node1 more
+                      if (!movingNodeIds.has(nodeId2) && nodeId1 !== draggedNodeId) {
+                        pos1.x -= nx * pushDist
+                        pos1.y -= ny * pushDist
                       }
                     }
                   })
                 })
+
+                // Early exit if no overlaps found
+                if (!hadOverlap) break
               }
 
               // Check if any positions actually changed (prevent infinite loop)
@@ -590,376 +650,330 @@ export function G6Graph() {
               }
             }
 
-            return prev
+            return updated
           }
           return prev
         }
 
-        // nodeRadius and minDistance already declared above (used by drag physics)
+        // ================================================================
+        // PROFESSIONAL FORCE-DIRECTED LAYOUT
+        // Four forces: attraction (edges), repulsion (all), collision, centering
+        // ================================================================
+
         const area = canvas.width * canvas.height
         const nodeCount = nodes.length
+        const k = Math.sqrt(area / nodeCount) // Optimal spacing
 
-        // Optimal edge length (k in F-R algorithm)
-        const k = Math.sqrt(area / nodeCount)
+        // Temperature for simulated annealing
+        const progress = iterationCount / maxIterations
+        const temperature = k * Math.pow(1 - progress, 2)
 
-        // Temperature for simulated annealing - exponential decay
-        // Start with 2x higher temperature to help escape local minima
-        const temperature = k * 2 * Math.pow(1 - iterationCount / maxIterations, 2)
+        // Initialize displacements map
+        const displacements = new Map<string, { x: number; y: number }>()
 
-        // nodeRadius and minDistance already declared above for overlap check
+        // Determine current phase
+        const currentPhase = iterationCount < phase1Iterations ? 1
+          : iterationCount < phase1Iterations + phase2Iterations ? 2
+          : iterationCount < phase1Iterations + phase2Iterations + phase3Iterations ? 3
+          : 4
 
-        // Stub orbit radius (how far nodes orbit around their stub)
-        const stubOrbitRadius = 150
-
-        // Minimum distance between different families = 2 * orbit radius
-        const familySeparation = stubOrbitRadius * 2
-
-        // Map each node to its stub family (adjacency and nodeMap already built above)
-        const nodeToFamily = new Map<string, string>()
+        // Calculate forces for all nodes uniformly
         nodes.forEach(node => {
+          const pos = prev.get(node.id)
+          if (!pos) return
+
+          // If this is the dragged node, keep it at its current position
+          if (draggedNodeId === node.id) {
+            updated.set(node.id, { ...pos, vx: 0, vy: 0 })
+            return
+          }
+
+          let fx = 0
+          let fy = 0
+
           const neighbors = adjacency.get(node.id) || new Set()
-          // Find connected stubs
-          for (const neighborId of neighbors) {
-            const neighbor = nodeMap.get(neighborId)
-            if (neighbor?.isStub) {
-              nodeToFamily.set(node.id, neighborId)
-              break
-            }
-          }
-          // Stubs are their own family
-          if (node.isStub) {
-            nodeToFamily.set(node.id, node.id)
-          }
-        })
+          const nodeDegree = neighbors.size
+          const isLeaf = nodeDegree === 1
 
-        // Calculate family sizes for force normalization
-        const familySizes = new Map<string, number>()
-        nodeToFamily.forEach((family) => {
-          familySizes.set(family, (familySizes.get(family) || 0) + 1)
-        })
+          // PHASE-SPECIFIC FORCE ADJUSTMENTS
+          // Phase 1: Explosion - weak leaf attraction, let everything spread
+          // Phase 2: Leaf retraction - medium-strong attraction, pull leaves closer
+          // Phase 3: Non-overlap - maintain spacing, continue leaf attraction
+          // Phase 4: Final snap - EXTREMELY strong leaf attraction to create hallways
 
-        // Separate stub nodes from child nodes
-        const stubNodes = nodes.filter(n => n.isStub)
-        const childNodes = nodes.filter(n => !n.isStub)
-
-        // PHASE 1: Calculate forces ONLY for stub nodes (stub-to-stub repulsion)
-        const stubDisplacements = new Map<string, { x: number; y: number }>()
-
-        stubNodes.forEach(stubNode => {
-          const pos = prev.get(stubNode.id)
-          if (!pos) return
-
-          let dx = 0
-          let dy = 0
-
-          // STUB-TO-STUB REPULSION ONLY
-          stubNodes.forEach(otherStub => {
-            if (otherStub.id === stubNode.id) return
-
-            const otherPos = prev.get(otherStub.id)
-            if (!otherPos) return
-
-            const deltaX = pos.x - otherPos.x
-            const deltaY = pos.y - otherPos.y
-            const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
-
-            if (distance > 0) {
-              // Scale by PRODUCT of their family sizes
-              const myFamily = nodeToFamily.get(stubNode.id)
-              const otherFamily = nodeToFamily.get(otherStub.id)
-              const myFamilySize = myFamily ? (familySizes.get(myFamily) || 1) : 1
-              const otherFamilySize = otherFamily ? (familySizes.get(otherFamily) || 1) : 1
-
-              // Larger stubs push each other harder to make room for their children
-              const force = (k * k * 10 * myFamilySize * otherFamilySize) / distance
-
-              dx += (deltaX / distance) * force
-              dy += (deltaY / distance) * force
-            }
-          })
-
-          // Weak center gravity to prevent explosion
-          const centerX = canvas.width / 2
-          const centerY = canvas.height / 2
-          const gravityStrength = 0.01
-          dx += (centerX - pos.x) * gravityStrength
-          dy += (centerY - pos.y) * gravityStrength
-
-          stubDisplacements.set(stubNode.id, { x: dx, y: dy })
-        })
-
-        // Apply stub displacements with temperature limiting
-        stubDisplacements.forEach((disp, stubId) => {
-          const pos = prev.get(stubId)
-          if (!pos) return
-
-          // If this is the dragged node, keep it at its current position
-          if (draggedNodeId === stubId) {
-            updated.set(stubId, { ...pos, vx: 0, vy: 0 })
-            return
-          }
-
-          const dispLength = Math.sqrt(disp.x * disp.x + disp.y * disp.y)
-
-          if (dispLength > 0) {
-            const progress = iterationCount / maxIterations
-            let damping = 0.3 + (0.4 * progress) // Starts slippery, ends gentle
-
-            // SIZE-BASED VELOCITY: Bigger stubs move faster
-            const family = nodeToFamily.get(stubId)
-            if (family) {
-              const familySize = familySizes.get(family) || 1
-              const speedBoost = Math.max(0.5, 1 - (familySize * 0.025))
-              damping *= speedBoost
-            }
-
-            // Random perturbation to escape local minima
-            const perturbStrength = temperature * 0.15 * (1 - progress)
-            const perturbX = (Math.random() - 0.5) * perturbStrength
-            const perturbY = (Math.random() - 0.5) * perturbStrength
-
-            // Limit by temperature
-            const limitedLength = Math.min(dispLength, temperature)
-            const vx = ((disp.x / dispLength) * limitedLength + perturbX) * damping
-            const vy = ((disp.y / dispLength) * limitedLength + perturbY) * damping
-
-            const newX = pos.x + vx
-            const newY = pos.y + vy
-
-            // Stop if movement is tiny AND we're in late stages
-            if (Math.abs(vx) < 0.01 && Math.abs(vy) < 0.01 && progress > 0.8) {
-              updated.set(stubId, { ...pos, vx: 0, vy: 0 })
-            } else {
-              updated.set(stubId, { x: newX, y: newY, vx, vy })
-            }
-          } else {
-            updated.set(stubId, pos)
-          }
-        })
-
-        // PHASE 2: Child nodes follow their parent stubs via spring forces
-        childNodes.forEach(childNode => {
-          const pos = prev.get(childNode.id)
-          if (!pos) return
-
-          // If this is the dragged node, keep it at its current position
-          if (draggedNodeId === childNode.id) {
-            updated.set(childNode.id, { ...pos, vx: 0, vy: 0 })
-            return
-          }
-
-          let dx = 0
-          let dy = 0
-
-          const neighbors = adjacency.get(childNode.id) || new Set()
-
-          // 1. SPRING FORCE: Pull toward parent stub
-          const parentStubId = nodeToFamily.get(childNode.id)
-          if (parentStubId) {
-            const stubPos = updated.get(parentStubId) // Use updated stub position
-            if (stubPos) {
-              const deltaX = stubPos.x - pos.x
-              const deltaY = stubPos.y - pos.y
-              const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
-
-              if (distance > 0) {
-                // Strong spring force to keep child near stub (Hooke's law: F = k * x)
-                const idealDistance = stubOrbitRadius
-                const stretch = distance - idealDistance
-                const springForce = stretch * 0.15 // Spring constant
-
-                dx += (deltaX / distance) * springForce
-                dy += (deltaY / distance) * springForce
-              }
-            }
-          }
-
-          // 2. REPULSION: Push away from sibling nodes in same family (prevent overlap)
-          childNodes.forEach(otherChild => {
-            if (otherChild.id === childNode.id) return
-
-            const otherFamily = nodeToFamily.get(otherChild.id)
-            const myFamily = nodeToFamily.get(childNode.id)
-
-            // Only repel within same family
-            if (myFamily && otherFamily && myFamily === otherFamily) {
-              const otherPos = updated.get(otherChild.id) || prev.get(otherChild.id)
-              if (!otherPos) return
-
-              const deltaX = pos.x - otherPos.x
-              const deltaY = pos.y - otherPos.y
-              const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
-
-              if (distance > 0 && distance < minDistance * 1.5) {
-                // Gentle repulsion between siblings
-                const force = (k * k * 2) / distance
-                dx += (deltaX / distance) * force
-                dy += (deltaY / distance) * force
-              }
-            }
-          })
-
-          // 3. NODE-TO-NODE CONNECTIONS: Pull toward connected non-stub nodes
+          // FORCE 1: Attractive Springs (Edge Connections Only)
           neighbors.forEach(neighborId => {
-            const neighbor = nodeMap.get(neighborId)
-            if (neighbor?.isStub) return // Skip stub connections (already handled above)
-
-            const neighborPos = updated.get(neighborId) || prev.get(neighborId)
+            const neighborPos = prev.get(neighborId)
             if (!neighborPos) return
 
-            const deltaX = neighborPos.x - pos.x
-            const deltaY = neighborPos.y - pos.y
-            const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
+            const neighborDegree = (adjacency.get(neighborId) || new Set()).size
+            const neighborIsLeaf = neighborDegree === 1
+
+            // If either node is a leaf, use special spring
+            const isLeafConnection = isLeaf || neighborIsLeaf
+
+            let idealLength: number
+            let springStrength: number
+
+            if (isLeafConnection) {
+              // PHASE-DEPENDENT leaf spring parameters
+              if (currentPhase === 1) {
+                // Phase 1: Medium springs, let leaves spread with parents during explosion
+                idealLength = 60   // Closer than normal connections (vs 120px)
+                springStrength = 0.5  // Moderate strength to resist drifting too far
+              } else if (currentPhase === 2) {
+                // Phase 2: Strong retraction, pull leaves significantly closer
+                idealLength = 40   // Pull closer to parent
+                springStrength = 2.0  // Much stronger to start retracting
+              } else if (currentPhase === 3) {
+                // Phase 3: Continue pulling leaves closer while maintaining spacing
+                idealLength = 20   // Very close - collision will prevent overlap
+                springStrength = 8.0  // Very strong pull
+              } else {
+                // Phase 4: EXTREMELY strong final snap - as close as collision allows
+                idealLength = 5   // Extremely small - leaves try to get as close as possible
+                springStrength = 20.0  // MASSIVELY strong to push leaves against collision boundary
+              }
+            } else {
+              // Normal connections: standard spring parameters
+              idealLength = 120  // Structural connections only
+              springStrength = 0.2
+            }
+
+            const dx = neighborPos.x - pos.x
+            const dy = neighborPos.y - pos.y
+            const distance = Math.sqrt(dx * dx + dy * dy)
 
             if (distance > 0) {
-              // Moderate spring force for node-to-node connections
-              const force = (distance * distance) / k * 0.8
-              dx += (deltaX / distance) * force
-              dy += (deltaY / distance) * force
+              // Hooke's law: F = k * (distance - idealLength)
+              const stretch = distance - idealLength
+              const force = stretch * springStrength
+
+              fx += (dx / distance) * force
+              fy += (dy / distance) * force
             }
           })
 
-          // Apply child node displacement with damping
-          const dispLength = Math.sqrt(dx * dx + dy * dy)
+          // FORCE 1b: Additional Attractive Force for Leaf Nodes to Parent
+          // Progressively stronger in phases 2-4
+          if (currentPhase >= 2 && isLeaf && neighbors.size === 1) {
+            const parentId = Array.from(neighbors)[0]
+            const parentPos = prev.get(parentId)
 
-          if (dispLength > 0) {
-            const progress = iterationCount / maxIterations
-            const damping = 0.5 + (0.3 * progress) // Smoother damping for children (0.5 -> 0.8)
+            if (parentPos) {
+              const dx = parentPos.x - pos.x
+              const dy = parentPos.y - pos.y
+              const distance = Math.sqrt(dx * dx + dy * dy)
 
-            // Children move more freely, less temperature constraint
-            const limitedLength = Math.min(dispLength, temperature * 1.5)
-            const vx = ((dx / dispLength) * limitedLength) * damping
-            const vy = ((dy / dispLength) * limitedLength) * damping
+              if (distance > 0) {
+                // Progressive magnetic attraction: starts in phase 2, increases each phase
+                // Goal: push leaves as close as collision allows
+                let attractionStrength: number
+                if (currentPhase === 2) {
+                  attractionStrength = 1.5  // Start pulling in phase 2
+                } else if (currentPhase === 3) {
+                  attractionStrength = 5.0  // Strong in phase 3 - push toward collision boundary
+                } else {
+                  attractionStrength = 10.0  // EXTREMELY strong in phase 4 - press against collision
+                }
+
+                const force = attractionStrength * distance
+
+                fx += (dx / distance) * force
+                fy += (dy / distance) * force
+              }
+            }
+          }
+
+          // FORCE 2: Strong Electrostatic Repulsion (Non-Leaf Nodes Only)
+          // Dramatically increased repulsion for hubs/core nodes
+          // Leaves get almost no repulsion so they don't push their parent away
+          nodes.forEach(otherNode => {
+            if (otherNode.id === node.id) return
+
+            const otherPos = prev.get(otherNode.id)
+            if (!otherPos) return
+
+            const otherNeighbors = adjacency.get(otherNode.id) || new Set()
+            const otherDegree = otherNeighbors.size
+            const otherIsLeaf = otherDegree === 1
+
+            const dx = pos.x - otherPos.x
+            const dy = pos.y - otherPos.y
+            const distance = Math.sqrt(dx * dx + dy * dy)
+
+            if (distance > 0) {
+              // MASSIVELY increased base repulsion to blast clusters apart
+              // Add LARGE variation based on node IDs for organic, non-uniform spacing
+              const nodeHash = (node.id.charCodeAt(0) + otherNode.id.charCodeAt(0)) % 100
+              const repulsionVariation = 0.5 + (nodeHash / 100) * 1.0  // 0.5 to 1.5 range (50%-150%)
+              let repulsionStrength = 8000 * repulsionVariation  // Varies between 4000-12000
+
+              // Leaves get almost no repulsion charge (don't push parent away)
+              if (isLeaf) {
+                repulsionStrength *= 0.02  // 2% strength for leaves
+              }
+              if (otherIsLeaf) {
+                repulsionStrength *= 0.02  // 2% strength if other is leaf
+              }
+
+              // FORCE 2b: Leaf-Parent Magnetic Repulsion
+              // Nodes with many leaves repel other nodes with leaves
+              // Like two north-end magnets pushing each other apart
+              if (!isLeaf && !otherIsLeaf) {
+                // Count leaf children for both nodes
+                let myLeafCount = 0
+                neighbors.forEach(neighborId => {
+                  const neighborDegree = (adjacency.get(neighborId) || new Set()).size
+                  if (neighborDegree === 1) myLeafCount++
+                })
+
+                let otherLeafCount = 0
+                otherNeighbors.forEach(neighborId => {
+                  const neighborDegree = (adjacency.get(neighborId) || new Set()).size
+                  if (neighborDegree === 1) otherLeafCount++
+                })
+
+                // If both nodes have leaves, add extra repulsion proportional to leaf counts
+                if (myLeafCount > 0 && otherLeafCount > 0) {
+                  // Magnetic repulsion: more leaves = stronger push
+                  const leafRepulsionMultiplier = Math.sqrt(myLeafCount * otherLeafCount) * 0.3
+                  repulsionStrength *= (1 + leafRepulsionMultiplier)
+                }
+              }
+
+              // Coulomb's law: F = k / distance
+              const force = repulsionStrength / distance
+
+              fx += (dx / distance) * force
+              fy += (dy / distance) * force
+            }
+          })
+
+          // FORCE 3: Hub Attraction (Cluster Gravity)
+          // Pull weakly toward the highest-degree neighbor (local hub)
+          // Makes each network segment collapse into compact core + halo
+          if (neighbors.size > 0) {
+            let highestDegreeNeighbor: string | null = null
+            let highestDegree = 0
+
+            neighbors.forEach(neighborId => {
+              const neighborDegree = (adjacency.get(neighborId) || new Set()).size
+              if (neighborDegree > highestDegree) {
+                highestDegree = neighborDegree
+                highestDegreeNeighbor = neighborId
+              }
+            })
+
+            if (highestDegreeNeighbor) {
+              const hubPos = prev.get(highestDegreeNeighbor)
+              if (hubPos) {
+                const dx = hubPos.x - pos.x
+                const dy = hubPos.y - pos.y
+                const distance = Math.sqrt(dx * dx + dy * dy)
+
+                if (distance > 0) {
+                  // Gentle attraction toward local hub (collapses cluster into tight core)
+                  const hubGravity = 0.05
+                  fx += (dx / distance) * distance * hubGravity
+                  fy += (dy / distance) * distance * hubGravity
+                }
+              }
+            }
+          }
+
+          // NO GLOBAL CENTERING FORCE
+          // Kill all weak centering - let strong repulsion naturally spread islands
+
+          displacements.set(node.id, { x: fx, y: fy })
+        })
+
+        // Apply forces with temperature-based damping
+        displacements.forEach((force, nodeId) => {
+          const pos = prev.get(nodeId)
+          if (!pos) return
+
+          if (draggedNodeId === nodeId) {
+            updated.set(nodeId, { ...pos, vx: 0, vy: 0 })
+            return
+          }
+
+          const forceLength = Math.sqrt(force.x * force.x + force.y * force.y)
+
+          if (forceLength > 0) {
+            // Apply temperature-based limiting
+            const limitedLength = Math.min(forceLength, temperature)
+            const damping = 0.6
+
+            const vx = (force.x / forceLength) * limitedLength * damping
+            const vy = (force.y / forceLength) * limitedLength * damping
 
             const newX = pos.x + vx
             const newY = pos.y + vy
 
-            // Stop if movement is tiny AND we're in late stages
-            if (Math.abs(vx) < 0.01 && Math.abs(vy) < 0.01 && progress > 0.8) {
-              updated.set(childNode.id, { ...pos, vx: 0, vy: 0 })
-            } else {
-              updated.set(childNode.id, { x: newX, y: newY, vx, vy })
-            }
+            updated.set(nodeId, { x: newX, y: newY, vx, vy })
           } else {
-            updated.set(childNode.id, pos)
+            updated.set(nodeId, pos)
           }
         })
 
-        // PROGRESSIVE OVERLAP ENFORCEMENT
-        // Early: nodes can pass through (helps untangle)
-        // Late: strict enforcement (prevents final overlaps)
-        const progress = iterationCount / maxIterations
-        const enforceOverlaps = progress > 0.3 // Start enforcing after 30% progress
+        // FORCE 4: Phase-Aware Collision Detection
+        // Phase 1: Allow leaf pass-through for untangling during explosion
+        // Phase 2: Allow leaf pass-through while retracting (helps leaves find path to parent)
+        // Phase 3: STRICT collision enforcement to create clean spacing
+        // Phase 4: Continue strict collision (leaves snapping tight, maintain hallways)
+        const nodeIds = Array.from(updated.keys())
+        const collisionMinDistance = nodeRadius * 4.0  // ~240px, extremely generous spacing
 
-        if (enforceOverlaps) {
-          const overlapNodeIds = Array.from(updated.keys())
-          const overlapStrength = Math.min(1, (progress - 0.3) / 0.7) // Gradually increase from 30% to 100%
+        // Phase-based collision enforcement
+        // Phase 1-2: Leaves can pass through (helps untangle and retract)
+        // Phase 3-4: Strict enforcement for ALL nodes (creates clean hallways)
+        const enforceLeafCollision = currentPhase >= 3
 
-          for (let i = 0; i < overlapNodeIds.length; i++) {
-            const id1 = overlapNodeIds[i]
-            const pos1 = updated.get(id1)!
+        for (let i = 0; i < nodeIds.length; i++) {
+          const id1 = nodeIds[i]
+          const pos1 = updated.get(id1)!
+          const node1Degree = (adjacency.get(id1) || new Set()).size
+          const node1IsLeaf = node1Degree === 1
 
-            for (let j = i + 1; j < overlapNodeIds.length; j++) {
-              const id2 = overlapNodeIds[j]
-              const pos2 = updated.get(id2)!
+          for (let j = i + 1; j < nodeIds.length; j++) {
+            const id2 = nodeIds[j]
+            const pos2 = updated.get(id2)!
+            const node2Degree = (adjacency.get(id2) || new Set()).size
+            const node2IsLeaf = node2Degree === 1
 
-              const dx = pos2.x - pos1.x
-              const dy = pos2.y - pos1.y
-              const distance = Math.sqrt(dx * dx + dy * dy)
+            // Skip collision for leaf nodes in Phase 1 (let them pass through)
+            if (!enforceLeafCollision && (node1IsLeaf || node2IsLeaf)) {
+              continue
+            }
 
-              // Overlap prevention with progressive strength
-              if (distance < minDistance && distance > 0) {
-                const overlap = minDistance - distance
-                const pushDistance = (overlap / 2) * overlapStrength
+            const dx = pos2.x - pos1.x
+            const dy = pos2.y - pos1.y
+            const distance = Math.sqrt(dx * dx + dy * dy)
 
-                const nx = dx / distance
-                const ny = dy / distance
+            // Hard collision: push apart if too close
+            if (distance < collisionMinDistance && distance > 0) {
+              const overlap = collisionMinDistance - distance
 
-                if (draggedNodeId !== id1) {
-                  pos1.x -= nx * pushDistance
-                  pos1.y -= ny * pushDistance
-                }
+              // Full strength in Phase 2-3 to maintain clean spacing
+              const collisionStrength = 1.0
 
-                if (draggedNodeId !== id2) {
-                  pos2.x += nx * pushDistance
-                  pos2.y += ny * pushDistance
-                }
+              const pushDistance = (overlap / 2) * collisionStrength
+
+              const nx = dx / distance
+              const ny = dy / distance
+
+              if (draggedNodeId !== id1) {
+                pos1.x -= nx * pushDistance
+                pos1.y -= ny * pushDistance
+              }
+
+              if (draggedNodeId !== id2) {
+                pos2.x += nx * pushDistance
+                pos2.y += ny * pushDistance
               }
             }
           }
-        }
-
-        // CLUSTER STABILIZATION - stop clusters that have enough space
-        if (progress > 0.5) {
-          // Calculate cluster velocities and nearby cluster distances
-          const clusterData = new Map<string, {
-            nodeIds: Set<string>,
-            centerX: number,
-            centerY: number,
-            avgVelocity: number,
-            nearestClusterDist: number
-          }>()
-
-          // Group nodes by family and calculate cluster centers
-          nodeToFamily.forEach((family, nodeId) => {
-            if (!clusterData.has(family)) {
-              clusterData.set(family, {
-                nodeIds: new Set(),
-                centerX: 0,
-                centerY: 0,
-                avgVelocity: 0,
-                nearestClusterDist: Infinity
-              })
-            }
-            clusterData.get(family)!.nodeIds.add(nodeId)
-          })
-
-          // Calculate centers and velocities
-          clusterData.forEach((data, family) => {
-            let totalX = 0, totalY = 0, totalVel = 0
-            data.nodeIds.forEach(nodeId => {
-              const pos = updated.get(nodeId)
-              if (pos) {
-                totalX += pos.x
-                totalY += pos.y
-                totalVel += Math.sqrt(pos.vx * pos.vx + pos.vy * pos.vy)
-              }
-            })
-            const count = data.nodeIds.size
-            data.centerX = totalX / count
-            data.centerY = totalY / count
-            data.avgVelocity = totalVel / count
-          })
-
-          // Find nearest cluster distance for each cluster
-          clusterData.forEach((data1, family1) => {
-            clusterData.forEach((data2, family2) => {
-              if (family1 === family2) return
-
-              const dx = data2.centerX - data1.centerX
-              const dy = data2.centerY - data1.centerY
-              const dist = Math.sqrt(dx * dx + dy * dy)
-
-              if (dist < data1.nearestClusterDist) {
-                data1.nearestClusterDist = dist
-              }
-            })
-          })
-
-          // Stop clusters that have enough space
-          const minClusterSeparation = 400 // Minimum space between cluster centers
-          clusterData.forEach((data, family) => {
-            // If cluster has enough space and is moving slowly, stop it
-            if (data.nearestClusterDist > minClusterSeparation && data.avgVelocity < 2) {
-              data.nodeIds.forEach(nodeId => {
-                const pos = updated.get(nodeId)
-                if (pos) {
-                  pos.vx = 0
-                  pos.vy = 0
-                }
-              })
-            }
-          })
         }
 
         return updated
