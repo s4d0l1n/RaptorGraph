@@ -15,6 +15,7 @@ import { calculateHierarchicalLayout } from '@/lib/layouts/hierarchicalLayout'
 import { calculateFruchtermanLayout } from '@/lib/layouts/fruchtermanLayout'
 import { calculateKamadaKawaiLayout } from '@/lib/layouts/kamadaKawaiLayout'
 import { calculateSpectralLayout } from '@/lib/layouts/spectralLayout'
+import { calculateSugiyamaLayout } from '@/lib/layouts/sugiyamaLayout'
 import { getVisibleNodesWithGrouping, calculateMetaNodePosition, transformEdgesForGrouping } from '@/lib/grouping'
 import { evaluateNodeRules, evaluateEdgeRules } from '@/lib/styleEvaluator'
 import { useRulesStore } from '@/stores/rulesStore'
@@ -235,18 +236,29 @@ export function G6Graph() {
 
       if (isMetaNode) {
         // Update meta-node position and mark as manually positioned
+        const newX = x - dragOffset.x
+        const newY = y - dragOffset.y
+
         setMetaNodePositions((prev) => {
           const newPositions = new Map(prev)
           const currentPos = newPositions.get(draggedNodeId)
           if (currentPos) {
             newPositions.set(draggedNodeId, {
               ...currentPos,
-              x: x - dragOffset.x,
-              y: y - dragOffset.y,
+              x: newX,
+              y: newY,
             })
           }
           return newPositions
         })
+
+        // Update target position so it doesn't snap back
+        setTargetMetaNodePositions((prev) => {
+          const newTargets = new Map(prev)
+          newTargets.set(draggedNodeId, { x: newX, y: newY })
+          return newTargets
+        })
+
         // Mark this meta-node as manually positioned
         setManuallyPositionedMetaNodes((prev) => {
           const newSet = new Set(prev)
@@ -255,17 +267,27 @@ export function G6Graph() {
         })
       } else {
         // Update regular node position
+        const newX = x - dragOffset.x
+        const newY = y - dragOffset.y
+
         setNodePositions((prev) => {
           const newPositions = new Map(prev)
           const currentPos = newPositions.get(draggedNodeId)
           if (currentPos) {
             newPositions.set(draggedNodeId, {
               ...currentPos,
-              x: x - dragOffset.x,
-              y: y - dragOffset.y,
+              x: newX,
+              y: newY,
             })
           }
           return newPositions
+        })
+
+        // Update target position so it doesn't snap back
+        setTargetNodePositions((prev) => {
+          const newTargets = new Map(prev)
+          newTargets.set(draggedNodeId, { x: newX, y: newY })
+          return newTargets
         })
       }
 
@@ -302,8 +324,8 @@ export function G6Graph() {
       const dragDistance = Math.sqrt((x - pos.x - dragOffset.x) ** 2 + (y - pos.y - dragOffset.y) ** 2)
 
       // If drag distance is small (less than 3 pixels), treat as click
-      // Only open detail panel on true clicks, not drags
       if (dragDistance < 3) {
+        // Only open detail panel on true clicks, not drags
         // Check if this is a meta-node click
         const isMetaNodeId = metaNodePositions.has(draggedNodeId)
 
@@ -331,196 +353,36 @@ export function G6Graph() {
   useEffect(() => {
     if (nodes.length === 0) return
 
-    const targets = new Map<string, { x: number; y: number }>()
     const canvas = canvasRef.current
     if (!canvas) return
 
     const width = canvas.offsetWidth
     const height = canvas.offsetHeight
 
-    // Apply layout based on configuration
-    switch (layoutConfig.type) {
-      case 'timeline': {
-        const result = calculateTimelineLayout(nodes, {
-          width,
-          height,
-          swimlaneAttribute: layoutConfig.timelineSwimlaneAttribute,
-          verticalSpacing: layoutConfig.timelineVerticalSpacing,
-          xSpacingMultiplier: layoutConfig.timelineXSpacingMultiplier,
-          ySpacingMultiplier: layoutConfig.timelineYSpacingMultiplier,
-          swimlaneSort: layoutConfig.timelineSwimlaneSort,
-          spacingMode: layoutConfig.timelineSpacingMode,
-          startTime: layoutConfig.timelineStartTime,
-          endTime: layoutConfig.timelineEndTime,
-          edges: edges,
-        })
-        result.positions.forEach((pos, nodeId) => {
-          targets.set(nodeId, { x: pos.x, y: pos.y })
-        })
-        setSwimlanes(result.swimlanes)
-        break
-      }
+    // NO LAYOUT ALGORITHMS - just initialize random positions
+    // Physics will handle everything in the render loop
 
-      case 'circle': {
-        const result = calculateCircleLayout(nodes, { width, height })
-        result.positions.forEach((pos, nodeId) => {
-          targets.set(nodeId, { x: pos.x, y: pos.y })
-        })
-        setSwimlanes(new Map())
-        break
-      }
-
-      case 'grid': {
-        const result = calculateGridLayout(nodes, { width, height })
-        result.positions.forEach((pos, nodeId) => {
-          targets.set(nodeId, { x: pos.x, y: pos.y })
-        })
-        setSwimlanes(new Map())
-        break
-      }
-
-      case 'concentric': {
-        const result = calculateConcentricLayout(nodes, edges, { width, height })
-        result.positions.forEach((pos, nodeId) => {
-          targets.set(nodeId, { x: pos.x, y: pos.y })
-        })
-        setSwimlanes(new Map())
-        break
-      }
-
-      case 'force': {
-        const result = calculateForceLayout(nodes, edges, {
-          width,
-          height,
-          iterations: 150,
-          repulsionStrength: 8000,
-          attractionStrength: 0.015,
-          centerGravity: 0.05,
-        })
-        result.positions.forEach((pos, nodeId) => {
-          targets.set(nodeId, { x: pos.x, y: pos.y })
-        })
-        setSwimlanes(new Map())
-        break
-      }
-
-      case 'hierarchical': {
-        const result = calculateHierarchicalLayout(nodes, edges, {
-          width,
-          height,
-          direction: layoutConfig.hierarchicalDirection || 'top-bottom',
-          levelSeparation: layoutConfig.hierarchicalLevelSeparation || 100,
-          nodeSeparation: layoutConfig.hierarchicalNodeSeparation || 80,
-        })
-        result.positions.forEach((pos, nodeId) => {
-          targets.set(nodeId, { x: pos.x, y: pos.y })
-        })
-        setSwimlanes(new Map())
-        break
-      }
-
-      case 'radial': {
-        const result = calculateRadialLayout(nodes, edges, {
-          width,
-          height,
-          innerRadius: 120,
-          radiusStep: 150,
-        })
-        result.positions.forEach((pos, nodeId) => {
-          targets.set(nodeId, { x: pos.x, y: pos.y })
-        })
-        setSwimlanes(new Map())
-        break
-      }
-
-      case 'fruchterman': {
-        const result = calculateFruchtermanLayout(nodes, edges, {
-          width,
-          height,
-          iterations: 50,
-          temperature: 100,
-        })
-        result.positions.forEach((pos, nodeId) => {
-          targets.set(nodeId, { x: pos.x, y: pos.y })
-        })
-        setSwimlanes(new Map())
-        break
-      }
-
-      case 'kamada-kawai': {
-        const result = calculateKamadaKawaiLayout(nodes, edges, {
-          width,
-          height,
-          springConstant: 1,
-          springLength: 50,
-          maxIterations: 100,
-          epsilon: 0.1,
-        })
-        result.positions.forEach((pos, nodeId) => {
-          targets.set(nodeId, { x: pos.x, y: pos.y })
-        })
-        setSwimlanes(new Map())
-        break
-      }
-
-      case 'spectral': {
-        const result = calculateSpectralLayout(nodes, edges, {
-          width,
-          height,
-        })
-        result.positions.forEach((pos, nodeId) => {
-          targets.set(nodeId, { x: pos.x, y: pos.y })
-        })
-        setSwimlanes(new Map())
-        break
-      }
-
-      case 'preset':
-      case 'fcose':
-      case 'dagre':
-        // These would require additional libraries or custom implementation
-        // Fall back to force layout now
-        {
-          const result = calculateForceLayout(nodes, edges, {
-            width,
-            height,
-            iterations: 150,
-          })
-          result.positions.forEach((pos, nodeId) => {
-            targets.set(nodeId, { x: pos.x, y: pos.y })
-          })
-          setSwimlanes(new Map())
-        }
-        break
-
-      default:
-        // Default circular layout
-        {
-          const result = calculateCircleLayout(nodes, { width, height })
-          result.positions.forEach((pos, nodeId) => {
-            targets.set(nodeId, { x: pos.x, y: pos.y })
-          })
-          setSwimlanes(new Map())
-        }
-    }
-
-    // Initialize node positions if they don't exist, or keep existing ones for animation
     setNodePositions((prev) => {
       const newPositions = new Map<string, NodePosition>()
-      targets.forEach((target, nodeId) => {
-        const existing = prev.get(nodeId)
+      nodes.forEach((node) => {
+        const existing = prev.get(node.id)
         if (existing) {
-          // Keep existing position for smooth animation
-          newPositions.set(nodeId, existing)
+          // Keep existing position
+          newPositions.set(node.id, existing)
         } else {
-          // New node - start at target position
-          newPositions.set(nodeId, { x: target.x, y: target.y, vx: 0, vy: 0 })
+          // New node - random initial position
+          newPositions.set(node.id, {
+            x: width / 2 + (Math.random() - 0.5) * 400,
+            y: height / 2 + (Math.random() - 0.5) * 400,
+            vx: 0,
+            vy: 0,
+          })
         }
       })
       return newPositions
     })
 
-    setTargetNodePositions(targets)
+    setSwimlanes(new Map())
   }, [nodes, edges, layoutConfig])
 
   // Calculate meta-node positions after node positions are set
@@ -594,6 +456,10 @@ export function G6Graph() {
     })
   }, [metaNodes, visibleMetaNodes, nodePositions, manuallyPositionedMetaNodes])
 
+  // Track simulation state
+  const [iterationCount, setIterationCount] = useState(0)
+  const maxIterations = 500
+
   // Render graph - optimized to only render when dependencies change
   useEffect(() => {
     if (!canvasRef.current || nodes.length === 0 || nodePositions.size === 0) return
@@ -610,63 +476,491 @@ export function G6Graph() {
     const render = () => {
       // Update animation time for effects
       setAnimationTime((prev) => prev + 0.016) // Assuming ~60fps
+      setIterationCount((prev) => Math.min(prev + 1, maxIterations))
 
-      // Physics-based animation: move nodes toward their targets
+      // FORCE-DIRECTED LAYOUT: Fruchterman-Reingold with family-based spacing
       setNodePositions((prev) => {
         const updated = new Map<string, NodePosition>()
-        let hasChanges = false
+        const canvas = canvasRef.current
+        if (!canvas) return prev
 
-        prev.forEach((pos, nodeId) => {
-          // Skip if being dragged
-          if (draggedNodeId === nodeId) {
-            updated.set(nodeId, pos)
-            return
-          }
-
-          const target = targetNodePositions.get(nodeId)
-          if (!target) {
-            updated.set(nodeId, pos)
-            return
-          }
-
-          // Calculate distance to target
-          const dx = target.x - pos.x
-          const dy = target.y - pos.y
-          const distance = Math.sqrt(dx * dx + dy * dy)
-
-          // If close enough, snap to target
-          if (distance < 0.5) {
-            updated.set(nodeId, { x: target.x, y: target.y, vx: 0, vy: 0 })
-            return
-          }
-
-          // Apply spring force toward target
-          const springStrength = 0.15 // How strongly nodes are pulled toward target
-          const damping = 0.7 // Velocity damping for smooth deceleration
-
-          // Calculate acceleration from spring force
-          const ax = dx * springStrength
-          const ay = dy * springStrength
-
-          // Update velocity with acceleration and damping
-          let vx = (pos.vx + ax) * damping
-          let vy = (pos.vy + ay) * damping
-
-          // Limit maximum velocity
-          const maxVelocity = 20
-          const speed = Math.sqrt(vx * vx + vy * vy)
-          if (speed > maxVelocity) {
-            vx = (vx / speed) * maxVelocity
-            vy = (vy / speed) * maxVelocity
-          }
-
-          // Update position
-          const newX = pos.x + vx
-          const newY = pos.y + vy
-
-          updated.set(nodeId, { x: newX, y: newY, vx, vy })
-          hasChanges = true
+        // Build adjacency map (needed for drag physics)
+        const adjacency = new Map<string, Set<string>>()
+        const nodeMap = new Map(nodes.map(n => [n.id, n]))
+        nodes.forEach(n => adjacency.set(n.id, new Set()))
+        edges.forEach(edge => {
+          adjacency.get(edge.source)?.add(edge.target)
+          adjacency.get(edge.target)?.add(edge.source)
         })
+
+        // Node sizing constants (used by drag physics and main physics)
+        const nodeRadius = 60
+        const minDistance = nodeRadius * 2.5
+
+        // Stop simulation after convergence
+        if (iterationCount >= maxIterations) {
+          // If user is dragging, apply spring physics to connected nodes
+          if (draggedNodeId) {
+            const updated = new Map<string, NodePosition>()
+            prev.forEach((pos, id) => updated.set(id, { ...pos }))
+
+            const draggedPos = prev.get(draggedNodeId)
+            if (draggedPos) {
+              const connectedNodes = adjacency.get(draggedNodeId) || new Set()
+
+              // Apply spring force to all directly connected nodes
+              connectedNodes.forEach(connectedId => {
+                const connectedPos = prev.get(connectedId)
+                if (!connectedPos) return
+
+                // Calculate spring force toward dragged node
+                const dx = draggedPos.x - connectedPos.x
+                const dy = draggedPos.y - connectedPos.y
+                const dist = Math.sqrt(dx * dx + dy * dy)
+
+                if (dist > 0) {
+                  const idealLength = 150
+                  const stretch = dist - idealLength
+                  const springForce = stretch * 0.12 // Spring strength
+
+                  const forceX = (dx / dist) * springForce
+                  const forceY = (dy / dist) * springForce
+
+                  // Apply with damping
+                  const damping = 0.4
+                  const newX = connectedPos.x + forceX * damping
+                  const newY = connectedPos.y + forceY * damping
+
+                  updated.set(connectedId, {
+                    x: newX,
+                    y: newY,
+                    vx: forceX * damping,
+                    vy: forceY * damping
+                  })
+                }
+              })
+
+              // OVERLAP PREVENTION during drag
+              const maxPasses = 3
+              for (let pass = 0; pass < maxPasses; pass++) {
+                // Check connected nodes against all other nodes
+                connectedNodes.forEach(nodeId1 => {
+                  const pos1 = updated.get(nodeId1)
+                  if (!pos1) return
+
+                  updated.forEach((pos2, nodeId2) => {
+                    // Skip self and dragged node
+                    if (nodeId1 === nodeId2 || nodeId2 === draggedNodeId) return
+
+                    const dx = pos2.x - pos1.x
+                    const dy = pos2.y - pos1.y
+                    const dist = Math.sqrt(dx * dx + dy * dy)
+
+                    if (dist < minDistance && dist > 0) {
+                      const overlap = minDistance - dist
+                      const pushDist = overlap / 2
+                      const nx = dx / dist
+                      const ny = dy / dist
+
+                      // Push apart
+                      pos1.x -= nx * pushDist
+                      pos1.y -= ny * pushDist
+
+                      // Also push the other node if it's connected
+                      if (connectedNodes.has(nodeId2)) {
+                        pos2.x += nx * pushDist
+                        pos2.y += ny * pushDist
+                      }
+                    }
+                  })
+                })
+              }
+
+              // Check if any positions actually changed (prevent infinite loop)
+              let hasChanges = false
+              updated.forEach((pos, id) => {
+                const oldPos = prev.get(id)
+                if (!oldPos || Math.abs(pos.x - oldPos.x) > 0.01 || Math.abs(pos.y - oldPos.y) > 0.01) {
+                  hasChanges = true
+                }
+              })
+
+              if (hasChanges) {
+                return updated
+              }
+            }
+
+            return prev
+          }
+          return prev
+        }
+
+        // nodeRadius and minDistance already declared above (used by drag physics)
+        const area = canvas.width * canvas.height
+        const nodeCount = nodes.length
+
+        // Optimal edge length (k in F-R algorithm)
+        const k = Math.sqrt(area / nodeCount)
+
+        // Temperature for simulated annealing - exponential decay
+        // Start with 2x higher temperature to help escape local minima
+        const temperature = k * 2 * Math.pow(1 - iterationCount / maxIterations, 2)
+
+        // nodeRadius and minDistance already declared above for overlap check
+
+        // Stub orbit radius (how far nodes orbit around their stub)
+        const stubOrbitRadius = 150
+
+        // Minimum distance between different families = 2 * orbit radius
+        const familySeparation = stubOrbitRadius * 2
+
+        // Map each node to its stub family (adjacency and nodeMap already built above)
+        const nodeToFamily = new Map<string, string>()
+        nodes.forEach(node => {
+          const neighbors = adjacency.get(node.id) || new Set()
+          // Find connected stubs
+          for (const neighborId of neighbors) {
+            const neighbor = nodeMap.get(neighborId)
+            if (neighbor?.isStub) {
+              nodeToFamily.set(node.id, neighborId)
+              break
+            }
+          }
+          // Stubs are their own family
+          if (node.isStub) {
+            nodeToFamily.set(node.id, node.id)
+          }
+        })
+
+        // Calculate family sizes for force normalization
+        const familySizes = new Map<string, number>()
+        nodeToFamily.forEach((family) => {
+          familySizes.set(family, (familySizes.get(family) || 0) + 1)
+        })
+
+        // Separate stub nodes from child nodes
+        const stubNodes = nodes.filter(n => n.isStub)
+        const childNodes = nodes.filter(n => !n.isStub)
+
+        // PHASE 1: Calculate forces ONLY for stub nodes (stub-to-stub repulsion)
+        const stubDisplacements = new Map<string, { x: number; y: number }>()
+
+        stubNodes.forEach(stubNode => {
+          const pos = prev.get(stubNode.id)
+          if (!pos) return
+
+          let dx = 0
+          let dy = 0
+
+          // STUB-TO-STUB REPULSION ONLY
+          stubNodes.forEach(otherStub => {
+            if (otherStub.id === stubNode.id) return
+
+            const otherPos = prev.get(otherStub.id)
+            if (!otherPos) return
+
+            const deltaX = pos.x - otherPos.x
+            const deltaY = pos.y - otherPos.y
+            const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
+
+            if (distance > 0) {
+              // Scale by PRODUCT of their family sizes
+              const myFamily = nodeToFamily.get(stubNode.id)
+              const otherFamily = nodeToFamily.get(otherStub.id)
+              const myFamilySize = myFamily ? (familySizes.get(myFamily) || 1) : 1
+              const otherFamilySize = otherFamily ? (familySizes.get(otherFamily) || 1) : 1
+
+              // Larger stubs push each other harder to make room for their children
+              const force = (k * k * 10 * myFamilySize * otherFamilySize) / distance
+
+              dx += (deltaX / distance) * force
+              dy += (deltaY / distance) * force
+            }
+          })
+
+          // Weak center gravity to prevent explosion
+          const centerX = canvas.width / 2
+          const centerY = canvas.height / 2
+          const gravityStrength = 0.01
+          dx += (centerX - pos.x) * gravityStrength
+          dy += (centerY - pos.y) * gravityStrength
+
+          stubDisplacements.set(stubNode.id, { x: dx, y: dy })
+        })
+
+        // Apply stub displacements with temperature limiting
+        stubDisplacements.forEach((disp, stubId) => {
+          const pos = prev.get(stubId)
+          if (!pos) return
+
+          // If this is the dragged node, keep it at its current position
+          if (draggedNodeId === stubId) {
+            updated.set(stubId, { ...pos, vx: 0, vy: 0 })
+            return
+          }
+
+          const dispLength = Math.sqrt(disp.x * disp.x + disp.y * disp.y)
+
+          if (dispLength > 0) {
+            const progress = iterationCount / maxIterations
+            let damping = 0.3 + (0.4 * progress) // Starts slippery, ends gentle
+
+            // SIZE-BASED VELOCITY: Bigger stubs move faster
+            const family = nodeToFamily.get(stubId)
+            if (family) {
+              const familySize = familySizes.get(family) || 1
+              const speedBoost = Math.max(0.5, 1 - (familySize * 0.025))
+              damping *= speedBoost
+            }
+
+            // Random perturbation to escape local minima
+            const perturbStrength = temperature * 0.15 * (1 - progress)
+            const perturbX = (Math.random() - 0.5) * perturbStrength
+            const perturbY = (Math.random() - 0.5) * perturbStrength
+
+            // Limit by temperature
+            const limitedLength = Math.min(dispLength, temperature)
+            const vx = ((disp.x / dispLength) * limitedLength + perturbX) * damping
+            const vy = ((disp.y / dispLength) * limitedLength + perturbY) * damping
+
+            const newX = pos.x + vx
+            const newY = pos.y + vy
+
+            // Stop if movement is tiny AND we're in late stages
+            if (Math.abs(vx) < 0.01 && Math.abs(vy) < 0.01 && progress > 0.8) {
+              updated.set(stubId, { ...pos, vx: 0, vy: 0 })
+            } else {
+              updated.set(stubId, { x: newX, y: newY, vx, vy })
+            }
+          } else {
+            updated.set(stubId, pos)
+          }
+        })
+
+        // PHASE 2: Child nodes follow their parent stubs via spring forces
+        childNodes.forEach(childNode => {
+          const pos = prev.get(childNode.id)
+          if (!pos) return
+
+          // If this is the dragged node, keep it at its current position
+          if (draggedNodeId === childNode.id) {
+            updated.set(childNode.id, { ...pos, vx: 0, vy: 0 })
+            return
+          }
+
+          let dx = 0
+          let dy = 0
+
+          const neighbors = adjacency.get(childNode.id) || new Set()
+
+          // 1. SPRING FORCE: Pull toward parent stub
+          const parentStubId = nodeToFamily.get(childNode.id)
+          if (parentStubId) {
+            const stubPos = updated.get(parentStubId) // Use updated stub position
+            if (stubPos) {
+              const deltaX = stubPos.x - pos.x
+              const deltaY = stubPos.y - pos.y
+              const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
+
+              if (distance > 0) {
+                // Strong spring force to keep child near stub (Hooke's law: F = k * x)
+                const idealDistance = stubOrbitRadius
+                const stretch = distance - idealDistance
+                const springForce = stretch * 0.15 // Spring constant
+
+                dx += (deltaX / distance) * springForce
+                dy += (deltaY / distance) * springForce
+              }
+            }
+          }
+
+          // 2. REPULSION: Push away from sibling nodes in same family (prevent overlap)
+          childNodes.forEach(otherChild => {
+            if (otherChild.id === childNode.id) return
+
+            const otherFamily = nodeToFamily.get(otherChild.id)
+            const myFamily = nodeToFamily.get(childNode.id)
+
+            // Only repel within same family
+            if (myFamily && otherFamily && myFamily === otherFamily) {
+              const otherPos = updated.get(otherChild.id) || prev.get(otherChild.id)
+              if (!otherPos) return
+
+              const deltaX = pos.x - otherPos.x
+              const deltaY = pos.y - otherPos.y
+              const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
+
+              if (distance > 0 && distance < minDistance * 1.5) {
+                // Gentle repulsion between siblings
+                const force = (k * k * 2) / distance
+                dx += (deltaX / distance) * force
+                dy += (deltaY / distance) * force
+              }
+            }
+          })
+
+          // 3. NODE-TO-NODE CONNECTIONS: Pull toward connected non-stub nodes
+          neighbors.forEach(neighborId => {
+            const neighbor = nodeMap.get(neighborId)
+            if (neighbor?.isStub) return // Skip stub connections (already handled above)
+
+            const neighborPos = updated.get(neighborId) || prev.get(neighborId)
+            if (!neighborPos) return
+
+            const deltaX = neighborPos.x - pos.x
+            const deltaY = neighborPos.y - pos.y
+            const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
+
+            if (distance > 0) {
+              // Moderate spring force for node-to-node connections
+              const force = (distance * distance) / k * 0.8
+              dx += (deltaX / distance) * force
+              dy += (deltaY / distance) * force
+            }
+          })
+
+          // Apply child node displacement with damping
+          const dispLength = Math.sqrt(dx * dx + dy * dy)
+
+          if (dispLength > 0) {
+            const progress = iterationCount / maxIterations
+            const damping = 0.5 + (0.3 * progress) // Smoother damping for children (0.5 -> 0.8)
+
+            // Children move more freely, less temperature constraint
+            const limitedLength = Math.min(dispLength, temperature * 1.5)
+            const vx = ((dx / dispLength) * limitedLength) * damping
+            const vy = ((dy / dispLength) * limitedLength) * damping
+
+            const newX = pos.x + vx
+            const newY = pos.y + vy
+
+            // Stop if movement is tiny AND we're in late stages
+            if (Math.abs(vx) < 0.01 && Math.abs(vy) < 0.01 && progress > 0.8) {
+              updated.set(childNode.id, { ...pos, vx: 0, vy: 0 })
+            } else {
+              updated.set(childNode.id, { x: newX, y: newY, vx, vy })
+            }
+          } else {
+            updated.set(childNode.id, pos)
+          }
+        })
+
+        // PROGRESSIVE OVERLAP ENFORCEMENT
+        // Early: nodes can pass through (helps untangle)
+        // Late: strict enforcement (prevents final overlaps)
+        const progress = iterationCount / maxIterations
+        const enforceOverlaps = progress > 0.3 // Start enforcing after 30% progress
+
+        if (enforceOverlaps) {
+          const overlapNodeIds = Array.from(updated.keys())
+          const overlapStrength = Math.min(1, (progress - 0.3) / 0.7) // Gradually increase from 30% to 100%
+
+          for (let i = 0; i < overlapNodeIds.length; i++) {
+            const id1 = overlapNodeIds[i]
+            const pos1 = updated.get(id1)!
+
+            for (let j = i + 1; j < overlapNodeIds.length; j++) {
+              const id2 = overlapNodeIds[j]
+              const pos2 = updated.get(id2)!
+
+              const dx = pos2.x - pos1.x
+              const dy = pos2.y - pos1.y
+              const distance = Math.sqrt(dx * dx + dy * dy)
+
+              // Overlap prevention with progressive strength
+              if (distance < minDistance && distance > 0) {
+                const overlap = minDistance - distance
+                const pushDistance = (overlap / 2) * overlapStrength
+
+                const nx = dx / distance
+                const ny = dy / distance
+
+                if (draggedNodeId !== id1) {
+                  pos1.x -= nx * pushDistance
+                  pos1.y -= ny * pushDistance
+                }
+
+                if (draggedNodeId !== id2) {
+                  pos2.x += nx * pushDistance
+                  pos2.y += ny * pushDistance
+                }
+              }
+            }
+          }
+        }
+
+        // CLUSTER STABILIZATION - stop clusters that have enough space
+        if (progress > 0.5) {
+          // Calculate cluster velocities and nearby cluster distances
+          const clusterData = new Map<string, {
+            nodeIds: Set<string>,
+            centerX: number,
+            centerY: number,
+            avgVelocity: number,
+            nearestClusterDist: number
+          }>()
+
+          // Group nodes by family and calculate cluster centers
+          nodeToFamily.forEach((family, nodeId) => {
+            if (!clusterData.has(family)) {
+              clusterData.set(family, {
+                nodeIds: new Set(),
+                centerX: 0,
+                centerY: 0,
+                avgVelocity: 0,
+                nearestClusterDist: Infinity
+              })
+            }
+            clusterData.get(family)!.nodeIds.add(nodeId)
+          })
+
+          // Calculate centers and velocities
+          clusterData.forEach((data, family) => {
+            let totalX = 0, totalY = 0, totalVel = 0
+            data.nodeIds.forEach(nodeId => {
+              const pos = updated.get(nodeId)
+              if (pos) {
+                totalX += pos.x
+                totalY += pos.y
+                totalVel += Math.sqrt(pos.vx * pos.vx + pos.vy * pos.vy)
+              }
+            })
+            const count = data.nodeIds.size
+            data.centerX = totalX / count
+            data.centerY = totalY / count
+            data.avgVelocity = totalVel / count
+          })
+
+          // Find nearest cluster distance for each cluster
+          clusterData.forEach((data1, family1) => {
+            clusterData.forEach((data2, family2) => {
+              if (family1 === family2) return
+
+              const dx = data2.centerX - data1.centerX
+              const dy = data2.centerY - data1.centerY
+              const dist = Math.sqrt(dx * dx + dy * dy)
+
+              if (dist < data1.nearestClusterDist) {
+                data1.nearestClusterDist = dist
+              }
+            })
+          })
+
+          // Stop clusters that have enough space
+          const minClusterSeparation = 400 // Minimum space between cluster centers
+          clusterData.forEach((data, family) => {
+            // If cluster has enough space and is moving slowly, stop it
+            if (data.nearestClusterDist > minClusterSeparation && data.avgVelocity < 2) {
+              data.nodeIds.forEach(nodeId => {
+                const pos = updated.get(nodeId)
+                if (pos) {
+                  pos.vx = 0
+                  pos.vy = 0
+                }
+              })
+            }
+          })
+        }
 
         return updated
       })
@@ -769,6 +1063,105 @@ export function G6Graph() {
         })
       }
 
+      // ===================================================================
+      // EDGE CROSSING DETECTION
+      // Only calculate crossings when physics is settled (performance optimization)
+      // ===================================================================
+
+      const edgeCrossings = new Map<string, Array<{ x: number; y: number }>>()
+
+      // Only detect crossings when physics has finished (iteration >= 500)
+      if (iterationCount >= maxIterations) {
+        // Helper: Check if two line segments intersect
+        const getLineIntersection = (
+          x1: number, y1: number, x2: number, y2: number,
+          x3: number, y3: number, x4: number, y4: number
+        ): { x: number; y: number } | null => {
+          const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+          if (Math.abs(denom) < 0.001) return null // Parallel or coincident
+
+          const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
+          const u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom
+
+          // Check if intersection is within both line segments
+          if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+            return {
+              x: x1 + t * (x2 - x1),
+              y: y1 + t * (y2 - y1)
+            }
+          }
+          return null
+        }
+
+        // Collect edge segments for intersection detection (only for straight lines)
+        interface EdgeSegment {
+          edgeId: string
+          x1: number
+          y1: number
+          x2: number
+          y2: number
+        }
+
+        const edgeSegments: EdgeSegment[] = []
+
+        transformedEdges.forEach((transformedEdge) => {
+          if (!transformedEdge.shouldRender) return
+
+          const { edge, renderSource, renderTarget, sourceIsMetaNode, targetIsMetaNode } = transformedEdge
+
+          if (filteredNodeIds) {
+            if (!filteredNodeIds.has(edge.source) || !filteredNodeIds.has(edge.target)) {
+              return
+            }
+          }
+
+          const sourcePos = sourceIsMetaNode
+            ? metaNodePositions.get(renderSource)
+            : nodePositions.get(renderSource)
+
+          const targetPos = targetIsMetaNode
+            ? metaNodePositions.get(renderTarget)
+            : nodePositions.get(renderTarget)
+
+          if (sourcePos && targetPos) {
+            edgeSegments.push({
+              edgeId: edge.id,
+              x1: sourcePos.x,
+              y1: sourcePos.y,
+              x2: targetPos.x,
+              y2: targetPos.y
+            })
+          }
+        })
+
+        // Find all intersections
+        for (let i = 0; i < edgeSegments.length; i++) {
+          for (let j = i + 1; j < edgeSegments.length; j++) {
+            const seg1 = edgeSegments[i]
+            const seg2 = edgeSegments[j]
+
+            const intersection = getLineIntersection(
+              seg1.x1, seg1.y1, seg1.x2, seg1.y2,
+              seg2.x1, seg2.y1, seg2.x2, seg2.y2
+            )
+
+            if (intersection) {
+              // Add crossing to the edge that should "hop" (use consistent ordering)
+              const hopEdgeId = seg1.edgeId < seg2.edgeId ? seg1.edgeId : seg2.edgeId
+
+              if (!edgeCrossings.has(hopEdgeId)) {
+                edgeCrossings.set(hopEdgeId, [])
+              }
+              edgeCrossings.get(hopEdgeId)!.push(intersection)
+            }
+          }
+        }
+      }
+
+      // ===================================================================
+      // EDGE RENDERING WITH HOPS
+      // ===================================================================
+
       // Draw edges using transformed edge list (accounts for grouping)
       transformedEdges.forEach((transformedEdge) => {
         if (!transformedEdge.shouldRender) return
@@ -859,11 +1252,62 @@ export function G6Graph() {
             ctx.lineTo(targetPos.x, targetPos.y)
             ctx.stroke()
           } else {
-            // Straight line (default)
-            ctx.beginPath()
-            ctx.moveTo(sourcePos.x, sourcePos.y)
-            ctx.lineTo(targetPos.x, targetPos.y)
-            ctx.stroke()
+            // Straight line (default) - with hop arcs at crossings
+            const crossings = edgeCrossings.get(edge.id) || []
+
+            if (crossings.length === 0) {
+              // No crossings - draw normal line
+              ctx.beginPath()
+              ctx.moveTo(sourcePos.x, sourcePos.y)
+              ctx.lineTo(targetPos.x, targetPos.y)
+              ctx.stroke()
+            } else {
+              // Has crossings - draw line with hop arcs
+              const hopRadius = 8 // Size of the hop arc
+
+              // Calculate line direction
+              const dx = targetPos.x - sourcePos.x
+              const dy = targetPos.y - sourcePos.y
+              const lineLength = Math.sqrt(dx * dx + dy * dy)
+              const dirX = dx / lineLength
+              const dirY = dy / lineLength
+
+              // Sort crossings by distance along the line
+              const sortedCrossings = crossings.map(crossing => {
+                const distAlongLine = (crossing.x - sourcePos.x) * dirX + (crossing.y - sourcePos.y) * dirY
+                return { ...crossing, distAlongLine }
+              }).sort((a, b) => a.distAlongLine - b.distAlongLine)
+
+              // Draw line segments between crossings with arcs
+              ctx.beginPath()
+              ctx.moveTo(sourcePos.x, sourcePos.y)
+
+              sortedCrossings.forEach(crossing => {
+                // Calculate perpendicular direction for arc
+                const perpX = -dirY
+                const perpY = dirX
+
+                // Points before and after the crossing
+                const beforeX = crossing.x - dirX * hopRadius
+                const beforeY = crossing.y - dirY * hopRadius
+                const afterX = crossing.x + dirX * hopRadius
+                const afterY = crossing.y + dirY * hopRadius
+
+                // Arc peak point (perpendicular to line)
+                const arcX = crossing.x + perpX * hopRadius
+                const arcY = crossing.y + perpY * hopRadius
+
+                // Draw to before crossing
+                ctx.lineTo(beforeX, beforeY)
+
+                // Draw arc over crossing
+                ctx.quadraticCurveTo(arcX, arcY, afterX, afterY)
+              })
+
+              // Draw final segment to target
+              ctx.lineTo(targetPos.x, targetPos.y)
+              ctx.stroke()
+            }
           }
 
           // Reset line dash

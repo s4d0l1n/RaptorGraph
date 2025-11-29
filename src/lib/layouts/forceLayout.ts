@@ -104,11 +104,8 @@ export function calculateForceLayout(
         }
       })
 
-      // Gravity towards center (prevents nodes from flying away)
-      const centerDx = width / 2 - pos.x
-      const centerDy = height / 2 - pos.y
-      fx += centerDx * centerGravity
-      fy += centerDy * centerGravity
+      // NO center gravity - allow nodes to spread naturally
+      // NO boundary constraints - nodes can position anywhere to avoid overlaps
 
       // Apply forces with damping
       const damping = 0.8
@@ -119,10 +116,8 @@ export function calculateForceLayout(
       pos.x += pos.vx * temperature
       pos.y += pos.vy * temperature
 
-      // Keep within bounds with padding
-      const padding = 100
-      pos.x = Math.max(padding, Math.min(width - padding, pos.x))
-      pos.y = Math.max(padding, Math.min(height - padding, pos.y))
+      // NO boundary constraints - let nodes expand freely beyond visible area
+      // This allows nodes to spread out as much as needed to prevent overlaps
     })
   }
 

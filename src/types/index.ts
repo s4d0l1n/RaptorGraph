@@ -471,6 +471,7 @@ export type LayoutType =
   | 'fruchterman'    // Fruchterman-Reingold algorithm
   | 'kamada-kawai'   // Kamada-Kawai algorithm
   | 'spectral'       // Spectral layout
+  | 'sugiyama'       // Sugiyama layered layout (minimizes edge crossings)
 
 /**
  * Timeline layout sort options
