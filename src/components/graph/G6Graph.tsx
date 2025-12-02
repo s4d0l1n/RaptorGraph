@@ -144,11 +144,12 @@ export function G6Graph() {
 
     // Apply grouping (hide nodes in collapsed groups, unless they match search)
     if (metaNodes.length > 0) {
-      filtered = getVisibleNodesWithGrouping(filtered, metaNodes, filteredNodeIds)
+      const activeFilter = filteredNodeIds && filteredNodeIds.size > 0 ? filteredNodeIds : undefined
+      filtered = getVisibleNodesWithGrouping(filtered, metaNodes, activeFilter)
     }
 
     // If search is active, filter to only matching nodes
-    if (filteredNodeIds) {
+    if (filteredNodeIds && filteredNodeIds.size > 0) {
       filtered = filtered.filter((node) => filteredNodeIds.has(node.id))
     }
 
@@ -2330,10 +2331,10 @@ export function G6Graph() {
 
       {/* Graph info indicator */}
       {nodes.length > 0 && (
-        <div className="absolute top-16 right-4 bg-dark-secondary/90 border border-dark rounded-lg overflow-hidden">
+        <div className="absolute top-16 right-4">
           <button
             onClick={() => setShowGraphInfo(!showGraphInfo)}
-            className="group w-full px-2 py-2 text-slate-300 hover:text-slate-100 transition-colors flex items-center gap-2"
+            className="group px-2 py-2 bg-dark-secondary/90 hover:bg-dark border border-dark rounded-lg text-slate-300 hover:text-slate-100 transition-colors flex items-center gap-2"
             title="Graph info"
           >
             <Info className="w-4 h-4 flex-shrink-0" />
@@ -2342,7 +2343,7 @@ export function G6Graph() {
             </span>
           </button>
           {showGraphInfo && (
-            <div className="border-t border-dark px-3 py-2 text-sm text-slate-300">
+            <div className="absolute top-0 right-16 bg-dark-secondary/90 border border-dark rounded-lg px-3 py-2 text-sm text-slate-300 min-w-[150px]">
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full bg-cyber-500" />
@@ -2382,24 +2383,21 @@ export function G6Graph() {
       {/* Physics Controls */}
       {nodes.length > 0 && (
         <div className="absolute top-40 right-4">
-          <div className="bg-dark-secondary/90 border border-dark rounded-lg overflow-hidden">
-            <button
-              onClick={() => setShowPhysicsControls(!showPhysicsControls)}
-              className="group w-full px-2 py-2 text-sm text-slate-300 hover:text-cyber-400 hover:bg-dark transition-all flex items-center justify-between gap-2 overflow-hidden hover:px-3"
-              title="Physics Parameters"
-            >
-              <div className="flex items-center gap-2 overflow-hidden">
-                <Settings className="w-4 h-4 flex-shrink-0" />
-                <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden">Physics</span>
-                {iterationCount < maxIterations && (
-                  <span className="flex-shrink-0 w-2 h-2 bg-green-400 rounded-full animate-pulse" title={`Calculating physics: ${iterationCount}/${maxIterations}`}></span>
-                )}
-              </div>
-              {showPhysicsControls && <ChevronUp className="w-4 h-4 flex-shrink-0" />}
-            </button>
+          <button
+            onClick={() => setShowPhysicsControls(!showPhysicsControls)}
+            className="group px-2 py-2 bg-dark-secondary/90 hover:bg-dark border border-dark rounded-lg text-sm text-slate-300 hover:text-cyber-400 transition-colors flex items-center gap-2"
+            title="Physics Parameters"
+          >
+            <Settings className="w-4 h-4 flex-shrink-0" />
+            <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden">Physics</span>
+            {iterationCount < maxIterations && (
+              <span className="flex-shrink-0 w-2 h-2 bg-green-400 rounded-full animate-pulse" title={`Calculating physics: ${iterationCount}/${maxIterations}`}></span>
+            )}
+          </button>
 
           {/* Controls panel */}
           {showPhysicsControls && (
+            <div className="absolute top-0 right-16 bg-dark-secondary/90 border border-dark rounded-lg overflow-hidden min-w-[280px]">
             <div className="border-t border-dark p-3 space-y-3">
               {/* Repulsion Strength */}
               <div>
@@ -2498,41 +2496,39 @@ export function G6Graph() {
                 </button>
               </div>
             </div>
+            </div>
           )}
-          </div>
         </div>
       )}
 
       {/* Minimap Panel */}
       {nodes.length > 0 && (
         <div className="absolute top-64 right-4">
-          <div className="bg-dark-secondary/90 border border-dark rounded-lg overflow-hidden">
-            <button
-              onClick={() => setShowMinimap(!showMinimap)}
-              className="group w-full px-2 py-2 text-sm text-slate-300 hover:text-cyber-400 hover:bg-dark transition-all flex items-center gap-2 overflow-hidden hover:px-3"
-              title="Minimap"
-            >
-              <MapIcon className="w-4 h-4 flex-shrink-0" />
-              <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden">Minimap</span>
-            </button>
+          <button
+            onClick={() => setShowMinimap(!showMinimap)}
+            className="group px-2 py-2 bg-dark-secondary/90 hover:bg-dark border border-dark rounded-lg text-sm text-slate-300 hover:text-cyber-400 transition-colors flex items-center gap-2"
+            title="Minimap"
+          >
+            <MapIcon className="w-4 h-4 flex-shrink-0" />
+            <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden">Minimap</span>
+          </button>
 
-            {/* Minimap content */}
-            {showMinimap && canvasRef.current && nodePositions.size > 0 && (
-              <div className="border-t border-dark p-2">
-                <Minimap
-                  nodePositions={nodePositions}
-                  metaNodePositions={metaNodePositions}
-                  panOffset={panOffset}
-                  zoom={zoom}
-                  canvasWidth={canvasRef.current.offsetWidth}
-                  canvasHeight={canvasRef.current.offsetHeight}
-                  onPanChange={(offset) => {
-                    setPanOffset(offset)
-                  }}
-                />
-              </div>
-            )}
-          </div>
+          {/* Minimap content */}
+          {showMinimap && canvasRef.current && nodePositions.size > 0 && (
+            <div className="absolute top-0 right-16 bg-dark-secondary/90 border border-dark rounded-lg p-2 min-w-[200px]">
+              <Minimap
+                nodePositions={nodePositions}
+                metaNodePositions={metaNodePositions}
+                panOffset={panOffset}
+                zoom={zoom}
+                canvasWidth={canvasRef.current.offsetWidth}
+                canvasHeight={canvasRef.current.offsetHeight}
+                onPanChange={(offset) => {
+                  setPanOffset(offset)
+                }}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -2606,7 +2602,7 @@ interface GraphControlsProps {
 
 function GraphControls({ zoom, onZoomIn, onZoomOut, onReset }: GraphControlsProps) {
   return (
-    <div className="absolute bottom-6 right-6 flex flex-col gap-2">
+    <div className="absolute top-96 right-4 flex flex-col gap-2">
       <button
         onClick={onZoomIn}
         disabled={zoom >= 5}
