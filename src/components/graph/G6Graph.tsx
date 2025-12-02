@@ -2602,7 +2602,7 @@ interface GraphControlsProps {
 
 function GraphControls({ zoom, onZoomIn, onZoomOut, onReset }: GraphControlsProps) {
   return (
-    <div className="absolute top-96 right-4 flex flex-col gap-2">
+    <div className="absolute bottom-6 right-4 flex flex-col gap-2">
       <button
         onClick={onZoomIn}
         disabled={zoom >= 5}

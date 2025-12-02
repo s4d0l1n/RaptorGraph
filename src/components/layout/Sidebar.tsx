@@ -151,7 +151,7 @@ export function Sidebar({
       {/* Footer - Version */}
       {!collapsed && (
         <div className="absolute bottom-4 left-3 right-3 text-xs text-slate-600 text-center border-t border-dark pt-3">
-          <p>RaptorGraph v1.2.5</p>
+          <p>RaptorGraph v1.2.6</p>
           <p className="mt-1">100% Offline</p>
         </div>
       )}

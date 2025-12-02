@@ -31,7 +31,6 @@ export function Minimap({
 }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [isDragging, setIsDragging] = useState(false)
-  const [isExpanded, setIsExpanded] = useState(false)
 
   const minimapWidth = 200
   const minimapHeight = 150
@@ -72,8 +71,6 @@ export function Minimap({
 
   // Render minimap
   useEffect(() => {
-    if (!isExpanded) return
-
     const canvas = canvasRef.current
     if (!canvas) return
 
@@ -144,7 +141,7 @@ export function Minimap({
     // Fill viewport with semi-transparent overlay
     ctx.fillStyle = 'rgba(251, 191, 36, 0.1)'
     ctx.fillRect(rectX, rectY, rectW, rectH)
-  }, [nodePositions, metaNodePositions, panOffset, zoom, canvasWidth, canvasHeight, isExpanded])
+  }, [nodePositions, metaNodePositions, panOffset, zoom, canvasWidth, canvasHeight])
 
   // Handle click/drag on minimap to change viewport
   const handleMinimapInteraction = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -195,56 +192,15 @@ export function Minimap({
   if (nodePositions.size === 0 && metaNodePositions.size === 0) return null
 
   return (
-    <div className="fixed bottom-6 right-24 z-40">
-      <div className="bg-dark-secondary border border-dark rounded-lg shadow-2xl transition-all duration-200 overflow-hidden">
-        {/* Icon-only button when collapsed */}
-        {!isExpanded && (
-          <button
-            onClick={() => {
-              setIsExpanded(true)
-            }}
-            className="p-2 flex items-center gap-2 text-slate-300 hover:text-slate-100 transition-colors"
-          >
-            <Map className="w-4 h-4" />
-          </button>
-        )}
-
-        {/* Expanded minimap */}
-        {isExpanded && (
-          <div>
-            {/* Header */}
-            <div className="flex items-center justify-between px-3 py-2 bg-dark-tertiary border-b border-dark">
-              <div className="flex items-center gap-2">
-                <Map className="w-4 h-4 text-slate-400" />
-                <span className="text-xs font-medium text-slate-300">Minimap</span>
-              </div>
-              <button
-                onClick={() => {
-                  setIsExpanded(false)
-                }}
-                className="p-1 hover:bg-dark rounded transition-colors text-slate-400 hover:text-slate-200"
-                title="Close minimap"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Canvas */}
-            <canvas
-              ref={canvasRef}
-              width={minimapWidth}
-              height={minimapHeight}
-              className="cursor-pointer"
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseUp}
-            />
-          </div>
-        )}
-      </div>
-    </div>
+    <canvas
+      ref={canvasRef}
+      width={minimapWidth}
+      height={minimapHeight}
+      className="cursor-pointer"
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+    />
   )
 }
