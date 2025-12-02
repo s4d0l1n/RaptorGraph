@@ -191,10 +191,12 @@ function generateNestedMetaNodes(
  * Get visible nodes considering meta-node collapse state
  * Returns nodes that should be visible based on grouping
  * Handles nested meta-nodes - a node is hidden if it's in any collapsed ancestor
+ * Nodes in filteredNodeIds remain visible even if in collapsed groups (for search)
  */
 export function getVisibleNodesWithGrouping(
   nodes: GraphNode[],
-  metaNodes: MetaNode[]
+  metaNodes: MetaNode[],
+  filteredNodeIds?: Set<string>
 ): GraphNode[] {
   if (metaNodes.length === 0) {
     return nodes
@@ -206,9 +208,16 @@ export function getVisibleNodesWithGrouping(
   // Check all layers from highest to lowest
   const sortedMetaNodes = [...metaNodes].sort((a, b) => b.layer - a.layer)
 
+  const hasActiveFilter = filteredNodeIds && filteredNodeIds.size > 0
+
   sortedMetaNodes.forEach((metaNode) => {
     if (metaNode.collapsed) {
-      metaNode.childNodeIds.forEach((id) => hiddenNodeIds.add(id))
+      metaNode.childNodeIds.forEach((id) => {
+        // Don't hide nodes that match search filter
+        if (!hasActiveFilter || !filteredNodeIds.has(id)) {
+          hiddenNodeIds.add(id)
+        }
+      })
     }
   })
 

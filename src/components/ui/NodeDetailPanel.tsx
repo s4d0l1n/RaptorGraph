@@ -61,8 +61,8 @@ export function NodeDetailPanel() {
     return undefined
   }, [node, styleRules, getFontTemplateById])
 
-  if (!selectedNodeId && !selectedMetaNodeId) return null
-  if (!node && !metaNode) return null
+  // Always show the panel, even when nothing is selected
+  const hasSelection = (selectedNodeId && node) || (selectedMetaNodeId && metaNode)
 
   // Get child nodes if this is a meta-node
   const childNodes = metaNode
@@ -87,7 +87,7 @@ export function NodeDetailPanel() {
   return (
     <aside className={cn(
       "bg-dark-secondary border-l border-dark flex-shrink-0 transition-all duration-300 relative flex flex-col h-screen",
-      isMinimized ? "w-16" : "w-96"
+      isMinimized ? "w-8" : "w-96"
     )}>
       {/* Collapse Toggle Button (matches left sidebar) */}
       <button
@@ -103,7 +103,7 @@ export function NodeDetailPanel() {
       </button>
 
       {/* Header */}
-      {!isMinimized && (
+      {!isMinimized && hasSelection && (
         <div className="flex items-center justify-between p-4 border-b border-dark bg-dark-tertiary flex-shrink-0">
           <div className="flex items-center gap-2">
             {isMetaNode ? (
@@ -139,6 +139,16 @@ export function NodeDetailPanel() {
       {/* Content */}
       {!isMinimized && (
         <div className="flex-1 overflow-y-auto p-4 space-y-6">
+          {/* Show message if nothing selected */}
+          {!hasSelection ? (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center text-slate-500 text-sm">
+                <p>Select a node or group</p>
+                <p className="mt-1">to view details</p>
+              </div>
+            </div>
+          ) : (
+            <>
           {/* Meta-node info or regular node info */}
         {isMetaNode && metaNode ? (
           <>
@@ -461,6 +471,8 @@ export function NodeDetailPanel() {
         </div>
         </>
       ) : null}
+      </>
+          )}
       </div>
       )}
     </aside>

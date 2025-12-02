@@ -1,4 +1,4 @@
-import { Moon, Sun, Save, FolderOpen } from 'lucide-react'
+import { Moon, Sun, Save, FolderOpen, FilePlus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface HeaderProps {
@@ -8,6 +8,7 @@ interface HeaderProps {
   onToggleDarkMode: () => void
   onSave: () => void
   onLoad: () => void
+  onNew: () => void
 }
 
 /**
@@ -20,6 +21,7 @@ export function Header({
   onToggleDarkMode,
   onSave,
   onLoad,
+  onNew,
 }: HeaderProps) {
   return (
     <header className="h-16 bg-dark-secondary border-b border-dark flex items-center justify-between px-6 flex-shrink-0">
@@ -32,25 +34,20 @@ export function Header({
           </span>
         </div>
 
-        {/* Stats */}
-        {(nodeCount > 0 || edgeCount > 0) && (
-          <div className="flex items-center gap-4 text-sm text-slate-400 border-l border-dark pl-6">
-            <div className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full bg-cyber-500" />
-              <span className="font-medium text-slate-300">{nodeCount}</span>
-              <span className="hidden sm:inline">nodes</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2 h-0.5 bg-slate-500" />
-              <span className="font-medium text-slate-300">{edgeCount}</span>
-              <span className="hidden sm:inline">edges</span>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Right: Controls */}
       <div className="flex items-center gap-2">
+        {/* New Button */}
+        <button
+          onClick={onNew}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-dark-tertiary hover:bg-slate-700 text-slate-300 transition-colors"
+          title="New project (clear all data)"
+        >
+          <FilePlus className="w-4 h-4" />
+          <span className="hidden sm:inline">New</span>
+        </button>
+
         {/* Save Button */}
         <button
           onClick={onSave}

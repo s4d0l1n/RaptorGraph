@@ -58,7 +58,7 @@ export function GroupingPanel() {
     const newLayer: CombinationLayer = {
       id: `layer-${Date.now()}`,
       attribute: '',
-      autoCollapse: false, // Default to expanded so nodes are visible inside boxes
+      autoCollapse: true, // Default to collapsed to show combo-containers with grid layout
       order: layers.length,
     }
     setLayers([...layers, newLayer])

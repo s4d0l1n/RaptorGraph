@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
-import { Download, Settings, RotateCcw, ChevronDown, ChevronUp, Map as MapIcon, Shapes } from 'lucide-react'
+import { Download, Settings, RotateCcw, ChevronDown, ChevronUp, Map as MapIcon, Shapes, Info } from 'lucide-react'
 import { useGraphStore } from '@/stores/graphStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -22,7 +22,6 @@ import { getVisibleNodesWithGrouping, calculateMetaNodePosition, transformEdgesF
 import { evaluateNodeRules, evaluateEdgeRules } from '@/lib/styleEvaluator'
 import { useRulesStore } from '@/stores/rulesStore'
 import { computeConvexHull, expandHull } from '@/lib/convexHull'
-import { createBubbleSet } from '@/lib/bubbleSets'
 import { Minimap } from './Minimap'
 
 interface NodePosition {
@@ -49,7 +48,7 @@ export function G6Graph() {
   const { setSelectedNodeId, setSelectedMetaNodeId, selectedNodeId, filteredNodeIds } = useUIStore()
   const { layoutConfig } = useProjectStore()
   const { getEdgeTemplateById, getDefaultEdgeTemplate, getCardTemplateById } = useTemplateStore()
-  const { exportAsPNG } = useGraphExport()
+  const { exportAsSVG } = useGraphExport()
   const { getEnabledRules } = useRulesStore()
   const [nodePositions, setNodePositions] = useState<Map<string, NodePosition>>(new Map())
   const [metaNodePositions, setMetaNodePositions] = useState<Map<string, NodePosition>>(new Map())
@@ -82,6 +81,7 @@ export function G6Graph() {
   // Visualization features
   const [showMinimap, setShowMinimap] = useState(false)
   const [showHulls, setShowHulls] = useState(false)
+  const [showGraphInfo, setShowGraphInfo] = useState(false)
   const [clusterHulls, setClusterHulls] = useState<Map<number, { x: number; y: number }[]>>(new Map())
 
   // Function to calculate hulls from current node positions (parent-leaf clustering)
@@ -140,14 +140,16 @@ export function G6Graph() {
 
   // Memoize visible nodes considering both filtering and grouping
   const visibleNodes = useMemo(() => {
-    // First apply filter
-    let filtered = filteredNodeIds
-      ? nodes.filter((node) => filteredNodeIds.has(node.id))
-      : nodes
+    let filtered = nodes
 
-    // Then apply grouping (hide nodes inside collapsed meta-nodes)
+    // Apply grouping (hide nodes in collapsed groups, unless they match search)
     if (metaNodes.length > 0) {
-      filtered = getVisibleNodesWithGrouping(filtered, metaNodes)
+      filtered = getVisibleNodesWithGrouping(filtered, metaNodes, filteredNodeIds)
+    }
+
+    // If search is active, filter to only matching nodes
+    if (filteredNodeIds) {
+      filtered = filtered.filter((node) => filteredNodeIds.has(node.id))
     }
 
     return filtered
@@ -201,101 +203,60 @@ export function G6Graph() {
     return nodes.filter((n) => n.isStub).length
   }, [nodes])
 
-  // Memoize export handler - exports full graph including off-screen nodes
-  const handleExport = useCallback(async () => {
+  // Memoize export handler - exports full graph as SVG
+  const handleExport = useCallback(() => {
     if (nodes.length === 0 || nodePositions.size === 0) return
 
-    // Calculate bounds of all nodes
-    let minX = Infinity, maxX = -Infinity
-    let minY = Infinity, maxY = -Infinity
+    // Compute styles for all nodes
+    const nodeStyles = new Map<string, any>()
+    const rules = getEnabledRules()
 
-    nodePositions.forEach((pos) => {
-      minX = Math.min(minX, pos.x)
-      maxX = Math.max(maxX, pos.x)
-      minY = Math.min(minY, pos.y)
-      maxY = Math.max(maxY, pos.y)
+    nodes.forEach((node) => {
+      const ruleResult = evaluateNodeRules(node, rules)
+      const templateId = ruleResult.cardTemplateId || node.cardTemplateId
+      const cardTemplate = templateId ? getCardTemplateById(templateId) : undefined
+
+      nodeStyles.set(node.id, {
+        backgroundColor: cardTemplate?.backgroundColor || (node.isStub ? '#1e293b' : '#0f172a'),
+        borderColor: cardTemplate?.borderColor || (node.isStub ? '#475569' : '#0891b2'),
+        borderWidth: cardTemplate?.borderWidth || 2,
+        textColor: '#e2e8f0',
+      })
     })
 
-    // Add padding
-    const padding = 200
-    const nodeRadius = 60
-    minX -= padding
-    maxX += padding + nodeRadius * 2
-    minY -= padding
-    maxY += padding + nodeRadius * 2
+    // Compute styles for all edges
+    const edgeStyles = new Map<string, any>()
 
-    const graphWidth = maxX - minX
-    const graphHeight = maxY - minY
+    edges.forEach((edge) => {
+      const ruleResult = evaluateEdgeRules(edge, rules)
+      const templateId = ruleResult.edgeTemplateId || edge.edgeTemplateId
+      const template = templateId ? getEdgeTemplateById(templateId) : getDefaultEdgeTemplate()
 
-    // Create export canvas
-    const exportCanvas = document.createElement('canvas')
-    const ctx = exportCanvas.getContext('2d')
-    if (!ctx) return
-
-    // Set export canvas size (2x for high resolution)
-    const scale = 2
-    exportCanvas.width = graphWidth * scale
-    exportCanvas.height = graphHeight * scale
-
-    // Apply scaling and translation
-    ctx.scale(scale, scale)
-    ctx.translate(-minX, -minY)
-
-    // Dark background
-    ctx.fillStyle = '#0f172a'
-    ctx.fillRect(minX, minY, graphWidth, graphHeight)
-
-    // Draw all edges
-    ctx.strokeStyle = '#475569'
-    ctx.lineWidth = 2
-    edges.forEach(edge => {
-      const sourcePos = nodePositions.get(edge.source)
-      const targetPos = nodePositions.get(edge.target)
-      if (sourcePos && targetPos) {
-        ctx.beginPath()
-        ctx.moveTo(sourcePos.x, sourcePos.y)
-        ctx.lineTo(targetPos.x, targetPos.y)
-        ctx.stroke()
-      }
+      edgeStyles.set(edge.id, {
+        color: template?.color || '#475569',
+        thickness: template?.width || 2,
+        opacity: template?.opacity ?? 0.5,
+        style: template?.style || 'solid',
+      })
     })
 
-    // Draw all nodes
-    nodes.forEach(node => {
-      const pos = nodePositions.get(node.id)
-      if (!pos) return
+    const canvas = canvasRef.current
+    if (!canvas) return
 
-      // Node circle
-      ctx.fillStyle = '#06b6d4'
-      ctx.beginPath()
-      ctx.arc(pos.x, pos.y, nodeRadius, 0, Math.PI * 2)
-      ctx.fill()
-
-      // Node label
-      ctx.fillStyle = '#ffffff'
-      ctx.font = '14px sans-serif'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.fillText(node.label || node.id, pos.x, pos.y)
-    })
-
-    // Export to PNG
-    const blob = await new Promise<Blob | null>((resolve) => {
-      exportCanvas.toBlob(resolve, 'image/png', 1.0)
-    })
-
-    if (!blob) return
-
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'raptorgraph-export.png'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
-
-    toast.success(`Exported full graph (${exportCanvas.width}x${exportCanvas.height}px)`)
-  }, [nodes, edges, nodePositions])
+    // Export as SVG
+    exportAsSVG(
+      nodes,
+      edges,
+      metaNodes,
+      nodePositions,
+      metaNodePositions,
+      nodeStyles,
+      edgeStyles,
+      canvas.width,
+      canvas.height,
+      'raptorgraph-export'
+    )
+  }, [nodes, edges, metaNodes, nodePositions, metaNodePositions, getEnabledRules, getCardTemplateById, getEdgeTemplateById, getDefaultEdgeTemplate, exportAsSVG])
 
   // Handler to rerun physics layout - reset everything like a refresh
   const handleRerunLayout = useCallback(() => {
@@ -367,13 +328,13 @@ export function G6Graph() {
       if (metaNode.collapsed) {
         // Collapsed meta-node - check full bounding box
         const nodeCount = metaNode.childNodeIds.length
-        const cols = Math.min(4, Math.ceil(Math.sqrt(nodeCount)))
+        const cols = Math.min(6, Math.ceil(Math.sqrt(nodeCount * 1.5))) // Wider rectangles
         const rows = Math.ceil(nodeCount / cols)
         const cardWidth = 120
         const cardHeight = 60
         const spacing = 15
         const padding = 25
-        const headerHeight = 35
+        const headerHeight = 0 // No header
         const containerWidth = Math.max(200, cols * (cardWidth + spacing) - spacing + padding * 2)
         const containerHeight = rows * (cardHeight + spacing) - spacing + padding * 2 + headerHeight
 
@@ -1822,88 +1783,15 @@ export function G6Graph() {
         }
       })
 
-      // ===================================================================
-      // BUBBLE SETS FOR META-NODES (GROUPS)
-      // Draw smooth bubble set outlines around collapsed meta-nodes
-      // ===================================================================
-
-      visibleMetaNodes.forEach((metaNode) => {
-        if (!metaNode.collapsed) return // Only draw for collapsed groups
-
-        const groupPoints = metaNode.childNodeIds
-          .map(nodeId => {
-            const pos = nodePositions.get(nodeId)
-            return pos ? { x: pos.x, y: pos.y } : null
-          })
-          .filter((p): p is { x: number; y: number } => p !== null)
-
-        if (groupPoints.length >= 2) {
-          // Create bubble set outline
-          const bubbleSet = createBubbleSet(groupPoints, 80, 0.7)
-
-          if (bubbleSet.length >= 3) {
-            // Draw filled bubble set with semi-transparent color
-            ctx.fillStyle = 'rgba(59, 130, 246, 0.08)'
-            ctx.strokeStyle = 'rgba(59, 130, 246, 0.4)'
-            ctx.lineWidth = 3
-            ctx.setLineDash([])
-
-            ctx.beginPath()
-            ctx.moveTo(bubbleSet[0].x, bubbleSet[0].y)
-            for (let i = 1; i < bubbleSet.length; i++) {
-              ctx.lineTo(bubbleSet[i].x, bubbleSet[i].y)
-            }
-            ctx.closePath()
-            ctx.fill()
-            ctx.stroke()
-          }
-        }
-      })
-
       // Draw meta-nodes
       visibleMetaNodes.forEach((metaNode) => {
         const pos = metaNodePositions.get(metaNode.id)
         if (!pos) return
 
         if (!metaNode.collapsed) {
-          // Draw expanded meta-node as a small clickable badge
-          const badgeWidth = 140
-          const badgeHeight = 30
-          const badgeX = pos.x - badgeWidth / 2
-          const badgeY = pos.y - badgeHeight / 2
-          const badgeRadius = 6
-
-          // Draw badge background
-          ctx.fillStyle = '#1e40af'
-          ctx.strokeStyle = '#3b82f6'
-          ctx.lineWidth = 2
-
-          ctx.beginPath()
-          ctx.moveTo(badgeX + badgeRadius, badgeY)
-          ctx.lineTo(badgeX + badgeWidth - badgeRadius, badgeY)
-          ctx.quadraticCurveTo(badgeX + badgeWidth, badgeY, badgeX + badgeWidth, badgeY + badgeRadius)
-          ctx.lineTo(badgeX + badgeWidth, badgeY + badgeHeight - badgeRadius)
-          ctx.quadraticCurveTo(badgeX + badgeWidth, badgeY + badgeHeight, badgeX + badgeWidth - badgeRadius, badgeY + badgeHeight)
-          ctx.lineTo(badgeX + badgeRadius, badgeY + badgeHeight)
-          ctx.quadraticCurveTo(badgeX, badgeY + badgeHeight, badgeX, badgeY + badgeHeight - badgeRadius)
-          ctx.lineTo(badgeX, badgeY + badgeRadius)
-          ctx.quadraticCurveTo(badgeX, badgeY, badgeX + badgeRadius, badgeY)
-          ctx.closePath()
-          ctx.fill()
-          ctx.stroke()
-
-          // Draw badge text
-          ctx.fillStyle = '#fff'
-          ctx.font = 'bold 11px sans-serif'
-          ctx.textAlign = 'center'
-          ctx.textBaseline = 'middle'
-          ctx.fillText(
-            `${metaNode.groupValue} (${metaNode.childNodeIds.length})`,
-            pos.x,
-            pos.y
-          )
-
-          return // Skip collapsed rendering
+          // Expanded meta-nodes no longer show a badge - they are invisible
+          // This forces all groupings to be shown as collapsed containers with grid layout
+          return // Skip rendering - nodes are shown ungrouped
         }
 
         // Draw collapsed meta-node - showing contained nodes with full styling
@@ -1912,8 +1800,9 @@ export function G6Graph() {
         const containedNodes = nodes.filter((n) => metaNode.childNodeIds.includes(n.id))
 
         // Calculate layout for contained nodes (grid layout)
+        // Use wider rectangles instead of squares for better visual organization
         const nodeCount = containedNodes.length
-        const cols = Math.min(4, Math.ceil(Math.sqrt(nodeCount))) // Max 4 columns
+        const cols = Math.min(6, Math.ceil(Math.sqrt(nodeCount * 1.5))) // Wider rectangles
         const rows = Math.ceil(nodeCount / cols)
 
         // Use base card dimensions (will be adjusted per node based on their templates)
@@ -1921,7 +1810,7 @@ export function G6Graph() {
         const baseCardHeight = 60
         const spacing = 15
         const padding = 25
-        const headerHeight = 35
+        const headerHeight = 0 // No header - removed blue label
 
         // For container sizing, use maximum size multiplier among contained nodes
         let maxSizeMultiplier = 1
@@ -1963,20 +1852,7 @@ export function G6Graph() {
         ctx.fill()
         ctx.stroke()
 
-        // Draw header
-        ctx.fillStyle = '#1e40af'
-        ctx.fillRect(containerX + 4, containerY + 4, containerWidth - 8, headerHeight - 4)
-
-        ctx.fillStyle = '#fff'
-        ctx.font = 'bold 13px sans-serif'
-        ctx.textAlign = 'left'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(metaNode.groupValue, containerX + padding, containerY + headerHeight / 2)
-
-        ctx.font = '11px sans-serif'
-        ctx.fillStyle = '#93c5fd'
-        ctx.textAlign = 'right'
-        ctx.fillText(`${nodeCount} node${nodeCount !== 1 ? 's' : ''}`, containerX + containerWidth - padding, containerY + headerHeight / 2)
+        // Header removed - no blue label displayed
 
         // Draw each contained node with full card styling
         const startX = containerX + padding
@@ -2436,25 +2312,39 @@ export function G6Graph() {
         onMouseLeave={handleMouseUp}
       />
 
-      {/* Node count indicator */}
+      {/* Graph info indicator */}
       {nodes.length > 0 && (
-        <div className="absolute top-4 left-4 px-3 py-2 bg-dark-secondary/90 border border-dark rounded-lg text-sm text-slate-300">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full bg-cyber-500" />
-              <span>{nodes.length} nodes</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-4 h-0.5 bg-slate-500" />
-              <span>{edges.length} edges</span>
-            </div>
-            {stubCount > 0 && (
-              <div className="flex items-center gap-1.5">
-                <div className="w-2 h-2 rounded-full bg-slate-500" />
-                <span>{stubCount} stubs</span>
+        <div className="absolute top-4 left-4 bg-dark-secondary/90 border border-dark rounded-lg overflow-hidden">
+          <button
+            onClick={() => setShowGraphInfo(!showGraphInfo)}
+            className="group w-full px-2 py-2 text-slate-300 hover:text-slate-100 transition-colors flex items-center gap-2"
+            title="Graph info"
+          >
+            <Info className="w-4 h-4 flex-shrink-0" />
+            <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden text-sm">
+              Info
+            </span>
+          </button>
+          {showGraphInfo && (
+            <div className="border-t border-dark px-3 py-2 text-sm text-slate-300">
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-cyber-500" />
+                  <span>{nodes.length} nodes</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-4 h-0.5 bg-slate-500" />
+                  <span>{edges.length} edges</span>
+                </div>
+                {stubCount > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-slate-500" />
+                    <span>{stubCount} stubs</span>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -2463,26 +2353,13 @@ export function G6Graph() {
         <button
           onClick={handleExport}
           className="group absolute top-4 right-4 px-2 py-2 bg-dark-secondary/90 hover:bg-dark border border-dark rounded-lg text-sm text-slate-300 hover:text-cyber-400 transition-all flex items-center gap-2 overflow-hidden hover:px-3"
-          title="Export graph as PNG (2x resolution)"
+          title="Export graph as SVG"
         >
           <Download className="w-4 h-4 flex-shrink-0" />
-          <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden">Export PNG</span>
+          <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden">Export SVG</span>
         </button>
       )}
 
-      {/* Minimap Toggle */}
-      {nodes.length > 0 && (
-        <button
-          onClick={() => setShowMinimap(!showMinimap)}
-          className={`group absolute top-16 right-4 px-2 py-2 bg-dark-secondary/90 hover:bg-dark border border-dark rounded-lg text-sm transition-all flex items-center gap-2 overflow-hidden hover:px-3 ${
-            showMinimap ? 'text-cyber-400 border-cyber-500/50' : 'text-slate-300'
-          }`}
-          title="Toggle Minimap"
-        >
-          <MapIcon className="w-4 h-4 flex-shrink-0" />
-          <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden">Minimap</span>
-        </button>
-      )}
 
       {/* Hull Outlines Toggle */}
       {nodes.length > 0 && (
@@ -2500,22 +2377,23 @@ export function G6Graph() {
 
       {/* Physics Controls */}
       {nodes.length > 0 && (
-        <div className="absolute top-40 right-4 bg-dark-secondary/90 border border-dark rounded-lg overflow-hidden">
-          {/* Toggle button */}
-          <button
-            onClick={() => setShowPhysicsControls(!showPhysicsControls)}
-            className="group w-full px-2 py-2 text-sm text-slate-300 hover:text-cyber-400 hover:bg-dark transition-all flex items-center justify-between gap-2 overflow-hidden hover:px-3"
-            title="Physics Parameters"
-          >
-            <div className="flex items-center gap-2 overflow-hidden">
-              <Settings className="w-4 h-4 flex-shrink-0" />
-              <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden">Physics</span>
-              {iterationCount < maxIterations && (
-                <span className="flex-shrink-0 w-2 h-2 bg-green-400 rounded-full animate-pulse" title={`Calculating physics: ${iterationCount}/${maxIterations}`}></span>
-              )}
-            </div>
-            {showPhysicsControls && <ChevronUp className="w-4 h-4 flex-shrink-0" />}
-          </button>
+        <div className="absolute top-40 right-4 space-y-2">
+          {/* Physics Panel */}
+          <div className="bg-dark-secondary/90 border border-dark rounded-lg overflow-hidden">
+            <button
+              onClick={() => setShowPhysicsControls(!showPhysicsControls)}
+              className="group w-full px-2 py-2 text-sm text-slate-300 hover:text-cyber-400 hover:bg-dark transition-all flex items-center justify-between gap-2 overflow-hidden hover:px-3"
+              title="Physics Parameters"
+            >
+              <div className="flex items-center gap-2 overflow-hidden">
+                <Settings className="w-4 h-4 flex-shrink-0" />
+                <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden">Physics</span>
+                {iterationCount < maxIterations && (
+                  <span className="flex-shrink-0 w-2 h-2 bg-green-400 rounded-full animate-pulse" title={`Calculating physics: ${iterationCount}/${maxIterations}`}></span>
+                )}
+              </div>
+              {showPhysicsControls && <ChevronUp className="w-4 h-4 flex-shrink-0" />}
+            </button>
 
           {/* Controls panel */}
           {showPhysicsControls && (
@@ -2618,6 +2496,41 @@ export function G6Graph() {
               </div>
             </div>
           )}
+          </div>
+
+          {/* Minimap Panel */}
+          <div className="bg-dark-secondary/90 border border-dark rounded-lg overflow-hidden">
+            <button
+              onClick={() => setShowMinimap(!showMinimap)}
+              className={`group w-full px-2 py-2 text-sm transition-all flex items-center justify-between gap-2 overflow-hidden hover:px-3 ${
+                showMinimap ? 'text-cyber-400 bg-dark' : 'text-slate-300 hover:text-cyber-400 hover:bg-dark'
+              }`}
+              title="Minimap"
+            >
+              <div className="flex items-center gap-2 overflow-hidden">
+                <MapIcon className="w-4 h-4 flex-shrink-0" />
+                <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden">Minimap</span>
+              </div>
+              {showMinimap && <ChevronUp className="w-4 h-4 flex-shrink-0" />}
+            </button>
+
+            {/* Minimap content */}
+            {showMinimap && canvasRef.current && nodePositions.size > 0 && (
+              <div className="border-t border-dark p-2">
+                <Minimap
+                  nodePositions={nodePositions}
+                  metaNodePositions={metaNodePositions}
+                  panOffset={panOffset}
+                  zoom={zoom}
+                  canvasWidth={canvasRef.current.offsetWidth}
+                  canvasHeight={canvasRef.current.offsetHeight}
+                  onPanChange={(offset) => {
+                    setPanOffset(offset)
+                  }}
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -2681,28 +2594,6 @@ export function G6Graph() {
             <span className="text-xs text-slate-400">Zoom:</span>
             <span className="font-medium">{(zoom * 100).toFixed(0)}%</span>
           </div>
-        </div>
-      )}
-
-      {/* Minimap */}
-      {showMinimap && nodes.length > 0 && canvasRef.current && (
-        <div className="absolute bottom-6 left-6 mb-16">
-          <Minimap
-            nodes={visibleNodes}
-            edges={visibleEdges}
-            nodePositions={nodePositions}
-            viewportX={-panOffset.x / zoom}
-            viewportY={-panOffset.y / zoom}
-            viewportWidth={canvasRef.current.offsetWidth / zoom}
-            viewportHeight={canvasRef.current.offsetHeight / zoom}
-            canvasWidth={canvasRef.current.offsetWidth}
-            canvasHeight={canvasRef.current.offsetHeight}
-            zoom={zoom}
-            panOffset={panOffset}
-            onViewportChange={(x, y) => {
-              setPanOffset({ x: -x * zoom, y: -y * zoom })
-            }}
-          />
         </div>
       )}
 

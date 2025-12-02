@@ -40,6 +40,7 @@ export function Minimap({
   const bounds = useRef({ minX: 0, maxX: 0, minY: 0, maxY: 0 })
 
   useEffect(() => {
+    if (!nodePositions || !metaNodePositions) return
     if (nodePositions.size === 0 && metaNodePositions.size === 0) return
 
     let minX = Infinity, maxX = -Infinity
@@ -102,24 +103,28 @@ export function Minimap({
     const toMinimapY = (y: number) => (y - minY) * scale + offsetY
 
     // Draw all nodes as small dots
-    ctx.fillStyle = '#0891b2'
-    nodePositions.forEach((pos) => {
-      const x = toMinimapX(pos.x)
-      const y = toMinimapY(pos.y)
-      ctx.beginPath()
-      ctx.arc(x, y, 2, 0, Math.PI * 2)
-      ctx.fill()
-    })
+    if (nodePositions) {
+      ctx.fillStyle = '#0891b2'
+      nodePositions.forEach((pos) => {
+        const x = toMinimapX(pos.x)
+        const y = toMinimapY(pos.y)
+        ctx.beginPath()
+        ctx.arc(x, y, 2, 0, Math.PI * 2)
+        ctx.fill()
+      })
+    }
 
     // Draw meta-nodes as slightly larger dots
-    ctx.fillStyle = '#3b82f6'
-    metaNodePositions.forEach((pos) => {
-      const x = toMinimapX(pos.x)
-      const y = toMinimapY(pos.y)
-      ctx.beginPath()
-      ctx.arc(x, y, 3, 0, Math.PI * 2)
-      ctx.fill()
-    })
+    if (metaNodePositions) {
+      ctx.fillStyle = '#3b82f6'
+      metaNodePositions.forEach((pos) => {
+        const x = toMinimapX(pos.x)
+        const y = toMinimapY(pos.y)
+        ctx.beginPath()
+        ctx.arc(x, y, 3, 0, Math.PI * 2)
+        ctx.fill()
+      })
+    }
 
     // Draw viewport rectangle
     const viewportX = -panOffset.x / zoom
@@ -186,10 +191,11 @@ export function Minimap({
     setIsDragging(false)
   }
 
+  if (!nodePositions || !metaNodePositions) return null
   if (nodePositions.size === 0 && metaNodePositions.size === 0) return null
 
   return (
-    <div className="fixed bottom-6 right-6 z-40">
+    <div className="fixed bottom-6 right-24 z-40">
       <div className="bg-dark-secondary border border-dark rounded-lg shadow-2xl transition-all duration-200 overflow-hidden">
         {/* Icon-only button when collapsed */}
         {!isExpanded && (
