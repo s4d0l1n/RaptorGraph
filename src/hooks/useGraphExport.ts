@@ -128,7 +128,7 @@ export function useGraphExport() {
   }, [])
 
   /**
-   * Export graph as SVG
+   * Export graph as SVG with current view state (zoom, pan, rotation)
    */
   const exportAsSVG = useCallback((
     nodes: GraphNode[],
@@ -140,45 +140,46 @@ export function useGraphExport() {
     edgeStyles: Map<string, any>,
     canvasWidth: number,
     canvasHeight: number,
+    zoom: number,
+    panOffset: { x: number; y: number },
+    rotation: number,
     filename = 'raptorgraph-export'
   ) => {
     try {
-      // Calculate bounds
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
-
-      nodePositions.forEach((pos) => {
-        minX = Math.min(minX, pos.x - 100)
-        maxX = Math.max(maxX, pos.x + 100)
-        minY = Math.min(minY, pos.y - 100)
-        maxY = Math.max(maxY, pos.y + 100)
-      })
-
-      metaNodePositions.forEach((pos) => {
-        minX = Math.min(minX, pos.x - 200)
-        maxX = Math.max(maxX, pos.x + 200)
-        minY = Math.min(minY, pos.y - 200)
-        maxY = Math.max(maxY, pos.y + 200)
-      })
-
-      const padding = 50
-      const viewWidth = maxX - minX + padding * 2
-      const viewHeight = maxY - minY + padding * 2
-
-      // Create SVG
+      // Create SVG with canvas dimensions to match current view
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-      svg.setAttribute('width', viewWidth.toString())
-      svg.setAttribute('height', viewHeight.toString())
-      svg.setAttribute('viewBox', `${minX - padding} ${minY - padding} ${viewWidth} ${viewHeight}`)
+      svg.setAttribute('width', canvasWidth.toString())
+      svg.setAttribute('height', canvasHeight.toString())
+      svg.setAttribute('viewBox', `0 0 ${canvasWidth} ${canvasHeight}`)
       svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
 
       // Add dark background
       const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
-      bg.setAttribute('x', (minX - padding).toString())
-      bg.setAttribute('y', (minY - padding).toString())
-      bg.setAttribute('width', viewWidth.toString())
-      bg.setAttribute('height', viewHeight.toString())
+      bg.setAttribute('x', '0')
+      bg.setAttribute('y', '0')
+      bg.setAttribute('width', canvasWidth.toString())
+      bg.setAttribute('height', canvasHeight.toString())
       bg.setAttribute('fill', '#0f172a')
       svg.appendChild(bg)
+
+      // Create group for transformed content (applies current view state)
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+
+      // Build transform to match canvas view: pan, zoom, and rotation
+      let transform = `translate(${panOffset.x}, ${panOffset.y}) scale(${zoom})`
+
+      // Add rotation if non-zero (rotate around canvas center)
+      if (rotation !== 0) {
+        const centerX = canvasWidth / 2
+        const centerY = canvasHeight / 2
+        // Transform the center point through inverse pan/zoom to graph space
+        const graphCenterX = (centerX - panOffset.x) / zoom
+        const graphCenterY = (centerY - panOffset.y) / zoom
+        transform = `translate(${panOffset.x}, ${panOffset.y}) scale(${zoom}) translate(${graphCenterX}, ${graphCenterY}) rotate(${rotation * 180 / Math.PI}) translate(${-graphCenterX}, ${-graphCenterY})`
+      }
+
+      g.setAttribute('transform', transform)
+      svg.appendChild(g)
 
       // Draw edges first (so they appear behind nodes)
       edges.forEach((edge) => {
@@ -198,7 +199,7 @@ export function useGraphExport() {
         if (style.style === 'dashed') {
           line.setAttribute('stroke-dasharray', '5,5')
         }
-        svg.appendChild(line)
+        g.appendChild(line)
       })
 
       // Draw meta-nodes
@@ -220,7 +221,7 @@ export function useGraphExport() {
         rect.setAttribute('stroke', '#3b82f6')
         rect.setAttribute('stroke-width', '2')
         rect.setAttribute('rx', '8')
-        svg.appendChild(rect)
+        g.appendChild(rect)
 
         // Add label
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text')
@@ -230,7 +231,7 @@ export function useGraphExport() {
         text.setAttribute('fill', '#94a3b8')
         text.setAttribute('font-size', '14')
         text.textContent = metaNode.label
-        svg.appendChild(text)
+        g.appendChild(text)
       })
 
       // Draw nodes
@@ -252,7 +253,7 @@ export function useGraphExport() {
         rect.setAttribute('stroke', style.borderColor || '#0891b2')
         rect.setAttribute('stroke-width', style.borderWidth?.toString() || '2')
         rect.setAttribute('rx', '6')
-        svg.appendChild(rect)
+        g.appendChild(rect)
 
         // Node label
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text')
@@ -264,7 +265,7 @@ export function useGraphExport() {
         text.setAttribute('font-size', '12')
         text.setAttribute('font-weight', 'bold')
         text.textContent = node.label.length > 15 ? node.label.slice(0, 15) + '...' : node.label
-        svg.appendChild(text)
+        g.appendChild(text)
       })
 
       // Convert SVG to string
@@ -282,7 +283,7 @@ export function useGraphExport() {
       document.body.removeChild(link)
       URL.revokeObjectURL(url)
 
-      toast.success(`Exported as ${filename}.svg (${Math.round(viewWidth)}x${Math.round(viewHeight)})`)
+      toast.success(`Exported as ${filename}.svg (${canvasWidth}x${canvasHeight}px, current view)`)
     } catch (error) {
       console.error('SVG export error:', error)
       toast.error('Failed to export as SVG')

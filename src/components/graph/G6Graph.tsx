@@ -308,7 +308,7 @@ export function G6Graph() {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    // Export as SVG
+    // Export as SVG with current view state
     exportAsSVG(
       nodes,
       edges,
@@ -319,9 +319,12 @@ export function G6Graph() {
       edgeStyles,
       canvas.width,
       canvas.height,
+      zoom,
+      panOffset,
+      rotation,
       'raptorgraph-export'
     )
-  }, [nodes, edges, metaNodes, nodePositions, metaNodePositions, getEnabledRules, getCardTemplateById, getEdgeTemplateById, getDefaultEdgeTemplate, exportAsSVG])
+  }, [nodes, edges, metaNodes, nodePositions, metaNodePositions, getEnabledRules, getCardTemplateById, getEdgeTemplateById, getDefaultEdgeTemplate, exportAsSVG, zoom, panOffset, rotation])
 
   // Handler to rerun physics layout - reset everything like a refresh
   const handleRerunLayout = useCallback(() => {
@@ -652,23 +655,26 @@ export function G6Graph() {
       // More granular zoom: smaller steps for smoother zooming
       const zoomFactor = e.deltaY > 0 ? 0.95 : 1.05 // 5% per scroll
 
+      // Calculate mouse position in canvas coordinates
+      const rect = canvas.getBoundingClientRect()
+      const mouseX = e.clientX - rect.left
+      const mouseY = e.clientY - rect.top
+
       setZoom((prevZoom) => {
         const newZoom = Math.max(0.1, Math.min(5, prevZoom * zoomFactor))
 
-        // Calculate mouse position in canvas coordinates
-        const rect = canvas.getBoundingClientRect()
-        const mouseX = e.clientX - rect.left
-        const mouseY = e.clientY - rect.top
+        // Use setPanOffset callback to get current panOffset value
+        setPanOffset((currentPanOffset) => {
+          // Calculate the point in graph space that the mouse is over (before zoom)
+          const graphX = (mouseX - currentPanOffset.x) / prevZoom
+          const graphY = (mouseY - currentPanOffset.y) / prevZoom
 
-        // Calculate the point in graph space that the mouse is over (before zoom)
-        const graphX = (mouseX - panOffset.x) / prevZoom
-        const graphY = (mouseY - panOffset.y) / prevZoom
+          // Calculate new pan offset to keep that point under the mouse (after zoom)
+          const newPanX = mouseX - graphX * newZoom
+          const newPanY = mouseY - graphY * newZoom
 
-        // Calculate new pan offset to keep that point under the mouse (after zoom)
-        const newPanX = mouseX - graphX * newZoom
-        const newPanY = mouseY - graphY * newZoom
-
-        setPanOffset({ x: newPanX, y: newPanY })
+          return { x: newPanX, y: newPanY }
+        })
 
         return newZoom
       })
@@ -680,7 +686,7 @@ export function G6Graph() {
     return () => {
       canvas.removeEventListener('wheel', handleWheel)
     }
-  }, [panOffset])
+  }, []) // Empty deps - event listener only registered once
 
   // Initialize node positions with memoized layout calculation
   useEffect(() => {
