@@ -4,7 +4,9 @@ import { useGraphStore } from '@/stores/graphStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useTemplateStore } from '@/stores/templateStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { useGraphExport } from '@/hooks/useGraphExport'
+import { WebGLRenderer, hexToRGBA } from '@/utils/webglRenderer'
 import { toast } from '@/components/ui/Toast'
 import { calculateTimelineLayout } from '@/lib/layouts/timelineLayout'
 import { calculateCircleLayout } from '@/lib/layouts/circleLayout'
@@ -50,6 +52,8 @@ export function G6Graph() {
   const { getEdgeTemplateById, getDefaultEdgeTemplate, getCardTemplateById } = useTemplateStore()
   const { exportAsSVG } = useGraphExport()
   const { getEnabledRules } = useRulesStore()
+  const { useWebGL } = useSettingsStore()
+  const webglRendererRef = useRef<WebGLRenderer | null>(null)
   const [nodePositions, setNodePositions] = useState<Map<string, NodePosition>>(new Map())
   const [metaNodePositions, setMetaNodePositions] = useState<Map<string, NodePosition>>(new Map())
   const [targetNodePositions, setTargetNodePositions] = useState<Map<string, { x: number; y: number }>>(new Map())
@@ -208,6 +212,35 @@ export function G6Graph() {
 
     setNodeDeviationFactors(newDeviations)
   }, [nodes, physicsParams.nodeChaosFactor])
+
+  // Initialize WebGL renderer when enabled
+  useEffect(() => {
+    if (!canvasRef.current || !useWebGL) {
+      // Cleanup WebGL renderer if it exists but we're switching to Canvas2D
+      if (webglRendererRef.current) {
+        webglRendererRef.current.dispose()
+        webglRendererRef.current = null
+      }
+      return
+    }
+
+    // Initialize WebGL renderer if not already created
+    if (!webglRendererRef.current) {
+      try {
+        webglRendererRef.current = new WebGLRenderer(canvasRef.current)
+      } catch (error) {
+        console.error('Failed to initialize WebGL renderer:', error)
+        toast({ message: 'WebGL initialization failed. Falling back to Canvas2D.', type: 'error' })
+      }
+    }
+
+    return () => {
+      if (webglRendererRef.current) {
+        webglRendererRef.current.dispose()
+        webglRendererRef.current = null
+      }
+    }
+  }, [useWebGL, canvasRef.current])
 
   // Smooth animation for view changes (zoom, pan, rotation)
   useEffect(() => {
@@ -1527,6 +1560,166 @@ export function G6Graph() {
       // Set canvas size
       canvas.width = canvas.offsetWidth
       canvas.height = canvas.offsetHeight
+
+      // ===================================================================
+      // WEBGL RENDERING PATH
+      // ===================================================================
+      if (useWebGL && webglRendererRef.current) {
+        const webgl = webglRendererRef.current
+
+        // Begin frame and clear
+        webgl.beginFrame()
+        webgl.setTransform(zoom, panOffset.x, panOffset.y, rotation)
+
+        // Render edges
+        transformedEdges.forEach((transformedEdge) => {
+          if (!transformedEdge.shouldRender) return
+
+          const { edge, renderSource, renderTarget, sourceIsMetaNode, targetIsMetaNode } = transformedEdge
+
+          if (filteredNodeIds) {
+            if (!filteredNodeIds.has(edge.source) || !filteredNodeIds.has(edge.target)) {
+              return
+            }
+          }
+
+          const sourcePos = sourceIsMetaNode
+            ? metaNodePositions.get(renderSource)
+            : nodePositions.get(renderSource)
+
+          const targetPos = targetIsMetaNode
+            ? metaNodePositions.get(renderTarget)
+            : nodePositions.get(renderTarget)
+
+          if (sourcePos && targetPos) {
+            const rules = getEnabledRules()
+            const ruleResult = evaluateEdgeRules(edge, rules)
+            const templateId = ruleResult.edgeTemplateId || edge.edgeTemplateId
+            const template = templateId
+              ? getEdgeTemplateById(templateId)
+              : getDefaultEdgeTemplate()
+
+            const edgeColor = template?.color || '#475569'
+            const edgeWidth = template?.width || 2
+            const edgeOpacity = template?.opacity ?? 1
+
+            const colorWithAlpha = hexToRGBA(edgeColor, edgeOpacity)
+            webgl.batchLine(sourcePos.x, sourcePos.y, targetPos.x, targetPos.y, colorWithAlpha, edgeWidth)
+          }
+        })
+
+        // Render visible nodes
+        visibleNodes.forEach((node) => {
+          const pos = nodePositions.get(node.id)
+          if (!pos) return
+
+          const isSelected = node.id === selectedNodeId
+          const rules = getEnabledRules()
+          const ruleResult = evaluateNodeRules(node, rules)
+          const templateId = ruleResult.cardTemplateId || node.cardTemplateId
+          const cardTemplate = templateId ? getCardTemplateById(templateId) : undefined
+
+          const sizeMultiplier = cardTemplate?.size || 1
+          const cardWidth = 120 * sizeMultiplier
+          const cardHeight = 60 * sizeMultiplier
+
+          const bgColor = cardTemplate?.backgroundColor || (node.isStub ? '#1e293b' : '#0f172a')
+          const borderColor = cardTemplate?.borderColor || (node.isStub ? '#475569' : '#0891b2')
+          const shape = cardTemplate?.shape || 'rect'
+
+          // Draw node shape
+          if (shape === 'circle') {
+            const radius = Math.min(cardWidth, cardHeight) / 2
+            webgl.batchCircle(pos.x, pos.y, radius, hexToRGBA(bgColor, 1), 32)
+            webgl.batchCircle(pos.x, pos.y, radius - 2, hexToRGBA(isSelected ? '#22d3ee' : borderColor, 1), 32, true)
+          } else {
+            // Rectangle (default)
+            webgl.batchRect(pos.x - cardWidth / 2, pos.y - cardHeight / 2, cardWidth, cardHeight, hexToRGBA(bgColor, 1))
+            // Border
+            const borderWidth = isSelected ? 3 : (cardTemplate?.borderWidth || 2)
+            const bColor = isSelected ? '#22d3ee' : borderColor
+            // Draw border as 4 lines
+            webgl.batchLine(pos.x - cardWidth / 2, pos.y - cardHeight / 2, pos.x + cardWidth / 2, pos.y - cardHeight / 2, hexToRGBA(bColor, 1), borderWidth)
+            webgl.batchLine(pos.x + cardWidth / 2, pos.y - cardHeight / 2, pos.x + cardWidth / 2, pos.y + cardHeight / 2, hexToRGBA(bColor, 1), borderWidth)
+            webgl.batchLine(pos.x + cardWidth / 2, pos.y + cardHeight / 2, pos.x - cardWidth / 2, pos.y + cardHeight / 2, hexToRGBA(bColor, 1), borderWidth)
+            webgl.batchLine(pos.x - cardWidth / 2, pos.y + cardHeight / 2, pos.x - cardWidth / 2, pos.y - cardHeight / 2, hexToRGBA(bColor, 1), borderWidth)
+          }
+
+          // Draw node label
+          const labelColor = cardTemplate?.labelColor || '#e2e8f0'
+          webgl.batchText(node.label, pos.x, pos.y - 10, 'bold 14px sans-serif', hexToRGBA(labelColor, 1), cardWidth - 10)
+
+          // Draw attributes if template has them
+          if (cardTemplate?.attributeDisplays) {
+            let yOffset = 10
+            const visibleAttrs = cardTemplate.attributeDisplays
+              .filter((attrDisplay) => attrDisplay.visible)
+              .sort((a, b) => a.order - b.order)
+
+            visibleAttrs.forEach((attrDisplay) => {
+              let attrValue = ''
+              if (attrDisplay.attributeName === '__id__') {
+                attrValue = node.id
+              } else if (node.attributes[attrDisplay.attributeName]) {
+                const value = node.attributes[attrDisplay.attributeName]
+                attrValue = Array.isArray(value) ? value.join(', ') : value
+              }
+
+              if (attrValue) {
+                const fontSize = attrDisplay.fontSize || 10
+                const attrColor = attrDisplay.color || '#94a3b8'
+                const labelText = attrDisplay.displayLabel || attrDisplay.attributeName
+                const prefix = attrDisplay.prefix || ''
+                const suffix = attrDisplay.suffix || ''
+                const fullText = `${prefix}${labelText}: ${attrValue}${suffix}`
+
+                webgl.batchText(fullText, pos.x, pos.y + yOffset, `${fontSize}px sans-serif`, hexToRGBA(attrColor, 1), cardWidth - 10)
+                yOffset += fontSize + 4
+              }
+            })
+          }
+        })
+
+        // Render meta-nodes
+        visibleMetaNodes.forEach((metaNode) => {
+          const pos = metaNodePositions.get(metaNode.id)
+          if (!pos) return
+
+          const isSelected = metaNode.id === selectedNodeId
+          const borderColor = isSelected ? '#22d3ee' : '#10b981'
+          const bgColor = '#1e293b'
+
+          // Meta-nodes are larger rectangles
+          const metaWidth = 150
+          const metaHeight = 100
+
+          webgl.batchRect(pos.x - metaWidth / 2, pos.y - metaHeight / 2, metaWidth, metaHeight, hexToRGBA(bgColor, 0.9))
+          // Border
+          const borderWidth = isSelected ? 3 : 2
+          webgl.batchLine(pos.x - metaWidth / 2, pos.y - metaHeight / 2, pos.x + metaWidth / 2, pos.y - metaHeight / 2, hexToRGBA(borderColor, 1), borderWidth)
+          webgl.batchLine(pos.x + metaWidth / 2, pos.y - metaHeight / 2, pos.x + metaWidth / 2, pos.y + metaHeight / 2, hexToRGBA(borderColor, 1), borderWidth)
+          webgl.batchLine(pos.x + metaWidth / 2, pos.y + metaHeight / 2, pos.x - metaWidth / 2, pos.y + metaHeight / 2, hexToRGBA(borderColor, 1), borderWidth)
+          webgl.batchLine(pos.x - metaWidth / 2, pos.y + metaHeight / 2, pos.x - metaWidth / 2, pos.y - metaHeight / 2, hexToRGBA(borderColor, 1), borderWidth)
+
+          // Label
+          webgl.batchText(metaNode.label, pos.x, pos.y - 20, 'bold 16px sans-serif', hexToRGBA('#e2e8f0', 1), metaWidth - 20)
+
+          // Node count
+          const nodeCount = metaNode.nodeIds.length
+          webgl.batchText(`${nodeCount} nodes`, pos.x, pos.y + 10, '12px sans-serif', hexToRGBA('#94a3b8', 1), metaWidth - 20)
+        })
+
+        // End frame and render to GPU
+        webgl.endFrame()
+
+        // Request next frame
+        animationRef.current = requestAnimationFrame(render)
+        return
+      }
+
+      // ===================================================================
+      // CANVAS 2D RENDERING PATH (FALLBACK)
+      // ===================================================================
 
       // Clear canvas
       ctx.fillStyle = '#0f172a'

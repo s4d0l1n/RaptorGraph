@@ -57,19 +57,13 @@ export function SettingsPanel() {
                 </label>
               </div>
 
-              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-                <p className="text-sm text-amber-300 font-medium mb-1">
-                  🚧 WebGL Rendering - Coming Soon
-                </p>
-                <p className="text-xs text-amber-200">
-                  WebGL implementation is in progress. For now, Canvas 2D rendering is used for all graphs.
-                  This toggle will activate GPU-accelerated rendering once WebGL support is complete.
-                </p>
-              </div>
-
-              <div className="p-3 bg-slate-500/10 border border-slate-500/30 rounded-lg">
-                <p className="text-sm text-slate-300">
-                  🎨 Currently using Canvas 2D rendering. Works great for graphs up to 1000+ nodes.
+              <div className="p-3 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
+                <p className="text-sm text-cyan-300">
+                  {useWebGL ? (
+                    <>⚡ WebGL Rendering Active - GPU-accelerated rendering for maximum performance</>
+                  ) : (
+                    <>🎨 Canvas 2D Rendering Active - Works great for graphs up to 1000+ nodes</>
+                  )}
                 </p>
               </div>
             </div>
