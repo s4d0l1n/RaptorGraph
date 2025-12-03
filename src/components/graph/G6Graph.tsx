@@ -1189,6 +1189,7 @@ export function G6Graph() {
           // FORCE 2: Strong Electrostatic Repulsion (Non-Leaf Nodes Only)
           // Dramatically increased repulsion for hubs/core nodes
           // Leaves get almost no repulsion so they don't push their parent away
+          // IMPORTANT: Siblings (nodes sharing a parent) don't repel each other
           nodes.forEach(otherNode => {
             if (otherNode.id === node.id) return
 
@@ -1198,6 +1199,13 @@ export function G6Graph() {
             const otherNeighbors = adjacency.get(otherNode.id) || new Set()
             const otherDegree = otherNeighbors.size
             const otherIsLeaf = otherDegree === 1
+
+            // Check if they're siblings (share at least one common parent)
+            const sharedParents = [...neighbors].filter(n => otherNeighbors.has(n))
+            if (sharedParents.length > 0) {
+              // Siblings don't repel - they cluster around their shared parent(s)
+              return
+            }
 
             const dx = pos.x - otherPos.x
             const dy = pos.y - otherPos.y
@@ -1306,8 +1314,24 @@ export function G6Graph() {
             }
           }
 
-          // NO GLOBAL CENTERING FORCE
-          // Kill all weak centering - let strong repulsion naturally spread islands
+          // FORCE 4: Center Gravity (Optional Global Centering)
+          // Weak pull toward canvas center to prevent nodes from drifting off-screen
+          if (physicsParams.centerGravity > 0) {
+            const canvas = canvasRef.current
+            if (canvas) {
+              const centerX = canvas.offsetWidth / 2
+              const centerY = canvas.offsetHeight / 2
+              const dx = centerX - pos.x
+              const dy = centerY - pos.y
+              const distance = Math.sqrt(dx * dx + dy * dy)
+
+              if (distance > 0) {
+                // Very weak pull toward center
+                fx += (dx / distance) * distance * physicsParams.centerGravity
+                fy += (dy / distance) * distance * physicsParams.centerGravity
+              }
+            }
+          }
 
           displacements.set(node.id, { x: fx, y: fy })
         })
@@ -2558,6 +2582,25 @@ export function G6Graph() {
                 />
                 <p className="text-xs text-slate-500 mt-1">
                   Randomizes physics per node for organic layouts
+                </p>
+              </div>
+
+              {/* Center Gravity */}
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">
+                  Center Gravity: {physicsParams.centerGravity.toFixed(3)}
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="0.01"
+                  step="0.0001"
+                  value={physicsParams.centerGravity}
+                  onChange={(e) => setPhysicsParams(prev => ({ ...prev, centerGravity: Number(e.target.value) }))}
+                  className="w-full h-1 bg-dark rounded-lg appearance-none cursor-pointer accent-cyber-500"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Pulls nodes toward canvas center
                 </p>
               </div>
 
