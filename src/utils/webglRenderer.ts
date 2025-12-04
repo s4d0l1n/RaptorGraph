@@ -215,22 +215,38 @@ export class WebGLRenderer {
 
     const width = this.canvas.width
     const height = this.canvas.height
-    const centerX = width / 2
-    const centerY = height / 2
+    const halfWidth = width / 2
+    const halfHeight = height / 2
 
-    const scaleX = (2 / width) * zoom
-    const scaleY = (-2 / height) * zoom
+    // WebGL uses NDC space [-1, 1], so we need to convert from pixel coordinates
+    // Canvas2D does: translate(pan + center) -> rotate -> scale -> translate(-center)
+    // We need to build equivalent matrix and convert to NDC
 
     const cos = Math.cos(rotation)
     const sin = Math.sin(rotation)
 
-    const tx = (panX + centerX) * (2 / width) - 1
-    const ty = -((panY + centerY) * (2 / height) - 1)
+    // Step 1: Translate to center with pan
+    const t1x = panX + halfWidth
+    const t1y = panY + halfHeight
 
+    // Step 2: Apply rotation and zoom (combined in matrix)
+    // Step 3: Translate back by center
+    const t2x = -halfWidth
+    const t2y = -halfHeight
+
+    // Combined translation after zoom and rotate
+    const finalTx = t1x + t2x * zoom * cos - t2y * zoom * sin
+    const finalTy = t1y + t2x * zoom * sin + t2y * zoom * cos
+
+    // Convert pixel space to NDC [-1, 1]
+    const scaleToNdcX = 2 / width
+    const scaleToNdcY = 2 / height
+
+    // Final matrix (column-major for WebGL)
     this.currentTransform = new Float32Array([
-      scaleX * cos, -scaleX * sin, 0,
-      scaleY * sin, scaleY * cos, 0,
-      tx, ty, 1
+      zoom * cos * scaleToNdcX, zoom * sin * scaleToNdcY, 0,
+      -zoom * sin * scaleToNdcX, zoom * cos * scaleToNdcY, 0,
+      finalTx * scaleToNdcX - 1, -(finalTy * scaleToNdcY - 1), 1
     ])
   }
 
