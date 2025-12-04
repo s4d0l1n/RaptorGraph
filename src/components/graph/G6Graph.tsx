@@ -1582,6 +1582,15 @@ export function G6Graph() {
         // Debug: Check if we have nodes to render
         if (nodePositions.size === 0) {
           console.warn('WebGL render: No node positions yet')
+        } else {
+          // Log first node position to debug
+          const firstNode = visibleNodes[0]
+          if (firstNode) {
+            const pos = nodePositions.get(firstNode.id)
+            if (pos) {
+              console.log('WebGL: First node at', pos.x, pos.y, 'Canvas:', canvas.width, canvas.height, 'Pan:', panOffset.x, panOffset.y, 'Zoom:', zoom)
+            }
+          }
         }
 
         // Begin frame and clear
