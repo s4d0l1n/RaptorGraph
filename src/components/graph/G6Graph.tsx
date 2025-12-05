@@ -46,7 +46,7 @@ function getRGBColor(time: number, speed: number): string {
 export function G6Graph() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { nodes, edges, metaNodes } = useGraphStore()
-  const { setSelectedNodeId, setSelectedMetaNodeId, selectedNodeId, filteredNodeIds } = useUIStore()
+  const { setSelectedNodeId, setSelectedMetaNodeId, selectedNodeId, selectedMetaNodeId, filteredNodeIds } = useUIStore()
   const { layoutConfig } = useProjectStore()
   const { getEdgeTemplateById, getDefaultEdgeTemplate, getCardTemplateById } = useTemplateStore()
   const { exportAsSVG } = useGraphExport()
@@ -89,6 +89,7 @@ export function G6Graph() {
   const [showGraphInfo, setShowGraphInfo] = useState(false)
   const [clusterHulls, setClusterHulls] = useState<Map<number, { x: number; y: number }[]>>(new Map())
   const [highlightedEdgeIds, setHighlightedEdgeIds] = useState<Set<string>>(new Set())
+  const [edgeDistances, setEdgeDistances] = useState<Map<string, number>>(new Map())
 
   // View controls
   const [isLocked, setIsLocked] = useState(false)
@@ -373,36 +374,82 @@ export function G6Graph() {
     setMaxIterations(prev => prev + 100)
   }, [])
 
-  // Effect to calculate and highlight shortest paths from selected node to all non-leaf nodes
+  // Effect to calculate and highlight shortest paths from selected node/meta-node to all stub nodes
   useEffect(() => {
+    // Determine starting nodes based on selection
+    let startNodeIds: string[] = []
+
     if (selectedNodeId) {
-      // Build adjacency map to determine node degrees (leaf = degree 1)
-      const adjacency = new Map<string, Set<string>>()
-      nodes.forEach(node => adjacency.set(node.id, new Set()))
-      edges.forEach(edge => {
-        adjacency.get(edge.source)?.add(edge.target)
-        adjacency.get(edge.target)?.add(edge.source)
-      })
-
-      // Find all non-leaf nodes (degree > 1)
-      const nonLeafNodes = nodes.filter(n => {
-        const degree = adjacency.get(n.id)?.size || 0
-        return degree > 1 && n.id !== selectedNodeId
-      })
-
-      const allPaths = new Set<string>()
-
-      // Calculate shortest path from selected node to each non-leaf node
-      nonLeafNodes.forEach(targetNode => {
-        const path = findShortestPath(selectedNodeId, targetNode.id, nodes, edges)
-        path.forEach(edgeId => allPaths.add(edgeId))
-      })
-
-      setHighlightedEdgeIds(allPaths)
-    } else {
-      setHighlightedEdgeIds(new Set()) // Clear highlights when no node is selected
+      // Regular node selected
+      startNodeIds = [selectedNodeId]
+    } else if (selectedMetaNodeId) {
+      // Meta-node selected - use all its child nodes as starting points
+      const metaNode = metaNodes.find(mn => mn.id === selectedMetaNodeId)
+      if (metaNode) {
+        startNodeIds = metaNode.childNodeIds
+      }
     }
-  }, [selectedNodeId, nodes, edges])
+
+    if (startNodeIds.length === 0) {
+      setHighlightedEdgeIds(new Set())
+      setEdgeDistances(new Map())
+      return
+    }
+
+    // Build adjacency map with edge IDs
+    const adjacency = new Map<string, { nodeId: string; edgeId: string }[]>()
+    nodes.forEach(node => adjacency.set(node.id, []))
+    edges.forEach(edge => {
+      adjacency.get(edge.source)?.push({ nodeId: edge.target, edgeId: edge.id })
+      adjacency.get(edge.target)?.push({ nodeId: edge.source, edgeId: edge.id })
+    })
+
+    // Find all stub nodes (nodes with isStub property)
+    const stubNodeIds = new Set(nodes.filter(n => n.isStub).map(n => n.id))
+
+    // BFS from all starting nodes to find shortest paths to all stub nodes
+    const visited = new Set<string>(startNodeIds)
+    const queue: { nodeId: string; distance: number; edgeId: string | null }[] =
+      startNodeIds.map(nodeId => ({ nodeId, distance: 0, edgeId: null }))
+
+    const edgeDistanceMap = new Map<string, number>()
+    const allPaths = new Set<string>()
+    const foundStubs = new Set<string>()
+
+    while (queue.length > 0) {
+      const { nodeId, distance, edgeId } = queue.shift()!
+
+      // Add the edge that got us here (if any) to the path
+      if (edgeId) {
+        edgeDistanceMap.set(edgeId, distance)
+        allPaths.add(edgeId)
+      }
+
+      // Check if current node is a stub
+      const isStub = stubNodeIds.has(nodeId)
+      if (isStub && distance > 0) {
+        foundStubs.add(nodeId)
+        // Don't continue BFS beyond stub nodes
+        continue
+      }
+
+      // Continue BFS to neighbors (if not a stub, or if we're at distance 0)
+      const neighbors = adjacency.get(nodeId) || []
+      for (const neighbor of neighbors) {
+        if (!visited.has(neighbor.nodeId)) {
+          visited.add(neighbor.nodeId)
+          queue.push({
+            nodeId: neighbor.nodeId,
+            distance: distance + 1,
+            edgeId: neighbor.edgeId
+          })
+        }
+      }
+    }
+
+    setHighlightedEdgeIds(allPaths)
+    setEdgeDistances(edgeDistanceMap)
+  }, [selectedNodeId, selectedMetaNodeId, nodes, edges, metaNodes])
 
   // Mouse event handlers for dragging and panning
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -449,12 +496,30 @@ export function G6Graph() {
       return;
     }
 
-    // Hit detection logic for nodes
+    // Hit detection logic for meta-nodes (check these first, they render on top)
+    for (const [metaNodeId, pos] of Array.from(metaNodePositions.entries()).reverse()) {
+      const distance = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2);
+      if (distance < 80) { // Larger hit radius for meta-nodes
+        // Always select the meta-node (for details panel and path highlighting)
+        setSelectedMetaNodeId(metaNodeId);
+        setSelectedNodeId(null); // Clear regular node selection
+
+        if (!isLocked) {
+          // If not locked, also prepare for dragging.
+          setDraggedNodeId(metaNodeId);
+          setDragOffset({ x: x - pos.x, y: y - pos.y });
+        }
+        return; // Stop processing, we've handled the click/drag.
+      }
+    }
+
+    // Hit detection logic for regular nodes
     for (const [nodeId, pos] of Array.from(nodePositions.entries()).reverse()) { // Reverse to check top nodes first
       const distance = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2);
       if (distance < 60) { // Hit radius
         // Always select the node (for details panel and path highlighting)
         setSelectedNodeId(nodeId);
+        setSelectedMetaNodeId(null); // Clear meta-node selection
 
         if (!isLocked) {
           // If not locked, also prepare for dragging.
@@ -468,7 +533,7 @@ export function G6Graph() {
     // If we reach here, no node was clicked. Start panning.
     setIsPanning(true);
     setPanStart({ x: e.clientX, y: e.clientY });
-  }, [nodePositions, metaNodePositions, panOffset, zoom, rotation, isLocked, visibleMetaNodes, metaNodes, setSelectedNodeId]);
+  }, [nodePositions, metaNodePositions, panOffset, zoom, rotation, isLocked, visibleMetaNodes, metaNodes, setSelectedNodeId, setSelectedMetaNodeId]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
@@ -686,19 +751,56 @@ export function G6Graph() {
       e.preventDefault()
 
       const rect = canvas.getBoundingClientRect()
-      const mouseX = e.clientX - rect.left
-      const mouseY = e.clientY - rect.top
+      let mouseX = e.clientX - rect.left
+      let mouseY = e.clientY - rect.top
 
+      // Account for canvas resolution scaling
+      const scaleX = canvas.width / rect.width
+      const scaleY = canvas.height / rect.height
+      mouseX *= scaleX
+      mouseY *= scaleY
+
+      const centerX = canvas.width / 2
+      const centerY = canvas.height / 2
+
+      // Transform mouse to world coordinates (before zoom change)
+      let worldX = mouseX - panOffset.x - centerX
+      let worldY = mouseY - panOffset.y - centerY
+
+      if (rotation !== 0) {
+        const rad = (rotation * Math.PI) / 180
+        const cos = Math.cos(-rad)
+        const sin = Math.sin(-rad)
+        const rotatedX = worldX * cos - worldY * sin
+        const rotatedY = worldX * sin + worldY * cos
+        worldX = rotatedX
+        worldY = rotatedY
+      }
+
+      worldX /= zoom
+      worldY /= zoom
+
+      // Calculate new zoom
       const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1
       const newZoom = Math.min(Math.max(zoom * zoomFactor, 0.1), 5)
 
-      // The graph coordinate that is under the mouse
-      const graphX = (mouseX - panOffset.x) / zoom
-      const graphY = (mouseY - panOffset.y) / zoom
+      // Transform world coordinates back to screen with new zoom
+      let newScreenX = worldX * newZoom
+      let newScreenY = worldY * newZoom
 
-      // The new pan offset that keeps the graph coordinate under the mouse
-      const newPanX = mouseX - graphX * newZoom
-      const newPanY = mouseY - graphY * newZoom
+      if (rotation !== 0) {
+        const rad = (rotation * Math.PI) / 180
+        const cos = Math.cos(rad)
+        const sin = Math.sin(rad)
+        const rotatedX = newScreenX * cos - newScreenY * sin
+        const rotatedY = newScreenX * sin + newScreenY * cos
+        newScreenX = rotatedX
+        newScreenY = rotatedY
+      }
+
+      // Calculate new pan offset to keep world point under mouse
+      const newPanX = mouseX - newScreenX - centerX
+      const newPanY = mouseY - newScreenY - centerY
 
       setZoom(newZoom)
       setPanOffset({ x: newPanX, y: newPanY })
@@ -709,7 +811,7 @@ export function G6Graph() {
     return () => {
       canvas.removeEventListener('wheel', handleWheel)
     }
-  }, [zoom, panOffset])
+  }, [zoom, panOffset, rotation])
 
   // Initialize node positions with memoized layout calculation
   useEffect(() => {
@@ -1740,13 +1842,22 @@ export function G6Graph() {
             ? getEdgeTemplateById(templateId)
             : getDefaultEdgeTemplate()
 
-          // Check if this edge is highlighted (shortest path from stub to selected node)
+          // Check if this edge is highlighted (shortest path from selected node to non-leaf nodes)
           const isHighlighted = highlightedEdgeIds.has(edge.id)
+
+          // Calculate opacity based on distance from selected node (gradient effect)
+          let highlightOpacity = 1
+          if (isHighlighted) {
+            const distance = edgeDistances.get(edge.id) || 1
+            // Fade from 1.0 (distance 1) to 0.3 (distance 5+)
+            // Formula: opacity = 1.0 - (distance - 1) * 0.15
+            highlightOpacity = Math.max(0.3, 1.0 - (distance - 1) * 0.15)
+          }
 
           // Apply template or use defaults, with highlighting override
           const edgeColor = isHighlighted ? '#22d3ee' : (template?.color || '#475569')
           const edgeWidth = isHighlighted ? 4 : (template?.width || 2)
-          const edgeOpacity = isHighlighted ? 1 : (template?.opacity ?? 1)
+          const edgeOpacity = isHighlighted ? highlightOpacity : (template?.opacity ?? 1)
           const edgeStyle = template?.style || 'solid'
           const lineType = template?.lineType || 'straight'
           const arrowType = template?.arrowType || 'default'
@@ -2433,7 +2544,7 @@ export function G6Graph() {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [nodes, edges, nodePositions, selectedNodeId, filteredNodeIds, visibleNodes, swimlanes, metaNodes, visibleMetaNodes, metaNodePositions, panOffset, zoom, rotation, transformedEdges, targetNodePositions, targetMetaNodePositions, draggedNodeId, manuallyPositionedMetaNodes, highlightedEdgeIds])
+  }, [nodes, edges, nodePositions, selectedNodeId, filteredNodeIds, visibleNodes, swimlanes, metaNodes, visibleMetaNodes, metaNodePositions, panOffset, zoom, rotation, transformedEdges, targetNodePositions, targetMetaNodePositions, draggedNodeId, manuallyPositionedMetaNodes, highlightedEdgeIds, edgeDistances])
 
   return (
     <div className="relative w-full h-full">
