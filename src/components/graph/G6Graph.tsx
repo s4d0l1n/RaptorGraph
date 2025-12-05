@@ -373,14 +373,28 @@ export function G6Graph() {
     setMaxIterations(prev => prev + 100)
   }, [])
 
-  // Effect to calculate and highlight shortest paths from stubs to the selected node
+  // Effect to calculate and highlight shortest paths from selected node to all non-leaf nodes
   useEffect(() => {
     if (selectedNodeId) {
-      const stubNodes = nodes.filter(n => n.isStub)
+      // Build adjacency map to determine node degrees (leaf = degree 1)
+      const adjacency = new Map<string, Set<string>>()
+      nodes.forEach(node => adjacency.set(node.id, new Set()))
+      edges.forEach(edge => {
+        adjacency.get(edge.source)?.add(edge.target)
+        adjacency.get(edge.target)?.add(edge.source)
+      })
+
+      // Find all non-leaf nodes (degree > 1)
+      const nonLeafNodes = nodes.filter(n => {
+        const degree = adjacency.get(n.id)?.size || 0
+        return degree > 1 && n.id !== selectedNodeId
+      })
+
       const allPaths = new Set<string>()
 
-      stubNodes.forEach(stubNode => {
-        const path = findShortestPath(stubNode.id, selectedNodeId, nodes, edges)
+      // Calculate shortest path from selected node to each non-leaf node
+      nonLeafNodes.forEach(targetNode => {
+        const path = findShortestPath(selectedNodeId, targetNode.id, nodes, edges)
         path.forEach(edgeId => allPaths.add(edgeId))
       })
 
@@ -439,11 +453,11 @@ export function G6Graph() {
     for (const [nodeId, pos] of Array.from(nodePositions.entries()).reverse()) { // Reverse to check top nodes first
       const distance = Math.sqrt((x - pos.x) ** 2 + (y - pos.y) ** 2);
       if (distance < 60) { // Hit radius
-        if (isLocked) {
-          // If locked, just select the node and do nothing else.
-          setSelectedNodeId(nodeId);
-        } else {
-          // If not locked, prepare for dragging.
+        // Always select the node (for details panel and path highlighting)
+        setSelectedNodeId(nodeId);
+
+        if (!isLocked) {
+          // If not locked, also prepare for dragging.
           setDraggedNodeId(nodeId);
           setDragOffset({ x: x - pos.x, y: y - pos.y });
         }
