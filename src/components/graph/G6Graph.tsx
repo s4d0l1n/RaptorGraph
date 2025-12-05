@@ -23,6 +23,7 @@ import { evaluateNodeRules, evaluateEdgeRules } from '@/lib/styleEvaluator'
 import { useRulesStore } from '@/stores/rulesStore'
 import { computeConvexHull, expandHull } from '@/lib/convexHull'
 import { Minimap } from './Minimap'
+import { findShortestPath } from '@/lib/graph-algorithms'
 
 interface NodePosition {
   x: number
@@ -87,6 +88,7 @@ export function G6Graph() {
   const [showHulls, setShowHulls] = useState(false)
   const [showGraphInfo, setShowGraphInfo] = useState(false)
   const [clusterHulls, setClusterHulls] = useState<Map<number, { x: number; y: number }[]>>(new Map())
+  const [highlightedEdgeIds, setHighlightedEdgeIds] = useState<Set<string>>(new Set())
 
   // View controls
   const [isLocked, setIsLocked] = useState(false)
@@ -371,34 +373,22 @@ export function G6Graph() {
     setMaxIterations(prev => prev + 100)
   }, [])
 
-  import { findShortestPath } from '@/lib/graph-algorithms'
-
-// ... (rest of the imports)
-
-// ...
-
-export function G6Graph() {
-  // ... (existing state)
-  const [highlightedEdgeIds, setHighlightedEdgeIds] = useState<Set<string>>(new Set())
-
-  // ... (existing hooks)
-
   // Effect to calculate and highlight shortest paths from stubs to the selected node
   useEffect(() => {
     if (selectedNodeId) {
-      const stubNodes = nodes.filter(n => n.isStub);
-      const allPaths = new Set<string>();
+      const stubNodes = nodes.filter(n => n.isStub)
+      const allPaths = new Set<string>()
 
       stubNodes.forEach(stubNode => {
-        const path = findShortestPath(stubNode.id, selectedNodeId, nodes, edges);
-        path.forEach(edgeId => allPaths.add(edgeId));
-      });
+        const path = findShortestPath(stubNode.id, selectedNodeId, nodes, edges)
+        path.forEach(edgeId => allPaths.add(edgeId))
+      })
 
-      setHighlightedEdgeIds(allPaths);
+      setHighlightedEdgeIds(allPaths)
     } else {
-      setHighlightedEdgeIds(new Set()); // Clear highlights when no node is selected
+      setHighlightedEdgeIds(new Set()) // Clear highlights when no node is selected
     }
-  }, [selectedNodeId, nodes, edges]);
+  }, [selectedNodeId, nodes, edges])
 
   // Mouse event handlers for dragging and panning
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -457,34 +447,6 @@ export function G6Graph() {
     setIsPanning(true);
     setPanStart({ x: e.clientX, y: e.clientY });
   }, [nodePositions, metaNodePositions, panOffset, zoom, rotation, isLocked, visibleMetaNodes, metaNodes, setSelectedNodeId]);
-
-  // ... (handleMouseMove and other functions remain largely the same)
-
-  // In the main render useEffect:
-  useEffect(() => {
-    // ... (inside the render loop)
-    
-    // EDGE RENDERING LOGIC
-    transformedEdges.forEach((transformedEdge) => {
-      // ... (existing edge rendering setup)
-      if (sourcePos && targetPos) {
-        // ... (rule evaluation)
-        const isHighlighted = highlightedEdgeIds.has(edge.id);
-
-        // Apply template or use defaults
-        const edgeColor = isHighlighted ? '#22d3ee' : (template?.color || '#475569');
-        const edgeWidth = isHighlighted ? 4 : (template?.width || 2);
-        const edgeOpacity = isHighlighted ? 1 : (template?.opacity ?? 1);
-
-        // ... (rest of the edge drawing logic using these new variables)
-      }
-    });
-
-    // ... (rest of the render function)
-  }, [/* all the many dependencies */, highlightedEdgeIds]);
-  
-  // ... (the rest of the G6Graph component)
-}
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
@@ -1727,10 +1689,13 @@ export function G6Graph() {
             ? getEdgeTemplateById(templateId)
             : getDefaultEdgeTemplate()
 
-          // Apply template or use defaults
-          const edgeColor = template?.color || '#475569'
-          const edgeWidth = template?.width || 2
-          const edgeOpacity = template?.opacity ?? 1
+          // Check if this edge is highlighted (shortest path from stub to selected node)
+          const isHighlighted = highlightedEdgeIds.has(edge.id)
+
+          // Apply template or use defaults, with highlighting override
+          const edgeColor = isHighlighted ? '#22d3ee' : (template?.color || '#475569')
+          const edgeWidth = isHighlighted ? 4 : (template?.width || 2)
+          const edgeOpacity = isHighlighted ? 1 : (template?.opacity ?? 1)
           const edgeStyle = template?.style || 'solid'
           const lineType = template?.lineType || 'straight'
           const arrowType = template?.arrowType || 'default'
@@ -2417,7 +2382,7 @@ export function G6Graph() {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [nodes, edges, nodePositions, selectedNodeId, filteredNodeIds, visibleNodes, swimlanes, metaNodes, visibleMetaNodes, metaNodePositions, panOffset, zoom, rotation, transformedEdges, targetNodePositions, targetMetaNodePositions, draggedNodeId, manuallyPositionedMetaNodes])
+  }, [nodes, edges, nodePositions, selectedNodeId, filteredNodeIds, visibleNodes, swimlanes, metaNodes, visibleMetaNodes, metaNodePositions, panOffset, zoom, rotation, transformedEdges, targetNodePositions, targetMetaNodePositions, draggedNodeId, manuallyPositionedMetaNodes, highlightedEdgeIds])
 
   return (
     <div className="relative w-full h-full">
