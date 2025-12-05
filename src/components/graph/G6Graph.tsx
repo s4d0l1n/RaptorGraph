@@ -399,8 +399,16 @@ export function G6Graph() {
     let x = e.clientX - rect.left;
     let y = e.clientY - rect.top;
 
+    // Use canvas internal dimensions (which should match offsetWidth/offsetHeight)
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
+
+    // Account for any scaling between displayed size and canvas resolution
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    x *= scaleX;
+    y *= scaleY;
 
     x = x - panOffset.x - centerX;
     y = y - panOffset.y - centerY;
@@ -468,8 +476,37 @@ export function G6Graph() {
 
     // Handle node/meta-node dragging
     if (draggedNodeId) {
-      const x = (e.clientX - rect.left - panOffset.x) / zoom
-      const y = (e.clientY - rect.top - panOffset.y) / zoom
+      // Transform mouse coordinates using the same logic as handleMouseDown
+      let x = e.clientX - rect.left
+      let y = e.clientY - rect.top
+
+      const centerX = canvas.width / 2
+      const centerY = canvas.height / 2
+
+      // Account for any scaling between displayed size and canvas resolution
+      const scaleX = canvas.width / rect.width
+      const scaleY = canvas.height / rect.height
+
+      x *= scaleX
+      y *= scaleY
+
+      x = x - panOffset.x - centerX
+      y = y - panOffset.y - centerY
+
+      if (rotation !== 0) {
+        const rad = (rotation * Math.PI) / 180
+        const cos = Math.cos(-rad)
+        const sin = Math.sin(-rad)
+        const rotatedX = x * cos - y * sin
+        const rotatedY = x * sin + y * cos
+        x = rotatedX
+        y = rotatedY
+      }
+
+      x /= zoom
+      y /= zoom
+      x += centerX
+      y += centerY
 
       // Check if dragging a meta-node
       const isMetaNode = metaNodePositions.has(draggedNodeId)
@@ -579,7 +616,7 @@ export function G6Graph() {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [draggedNodeId, dragOffset, isPanning, panStart, panOffset, zoom, metaNodePositions, metaNodes, nodePositions])
+  }, [draggedNodeId, dragOffset, isPanning, panStart, panOffset, zoom, rotation, metaNodePositions, metaNodes, nodePositions])
 
   const handleMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     // Stop panning
