@@ -2541,31 +2541,27 @@ export function G6Graph() {
       {nodes.length > 0 && (
         <div className="absolute top-40 right-4 flex flex-col gap-2">
           {/* Physics Settings Button */}
-          <div className="group">
-            <button
-              onClick={() => setShowPhysicsPanel(!showPhysicsPanel)}
-              className="w-full px-2 py-2 bg-dark-secondary/90 hover:bg-dark border border-dark rounded-lg text-sm text-slate-300 hover:text-cyber-400 transition-colors flex items-center gap-2"
-              title="Physics Parameters"
-            >
-              <Settings className="w-4 h-4 flex-shrink-0" />
-              <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden">Physics</span>
-              {iterationCount < maxIterations && (
-                <span className="flex-shrink-0 w-2 h-2 bg-green-400 rounded-full animate-pulse" title={`Calculating physics: ${iterationCount}/${maxIterations}`}></span>
-              )}
-            </button>
-          </div>
+          <button
+            onClick={() => setShowPhysicsPanel(!showPhysicsPanel)}
+            className="group w-full px-2 py-2 bg-dark-secondary/90 hover:bg-dark border border-dark rounded-lg text-sm text-slate-300 hover:text-cyber-400 transition-colors flex items-center gap-2"
+            title="Physics Parameters"
+          >
+            <Settings className="w-4 h-4 flex-shrink-0" />
+            <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden">Physics</span>
+            {iterationCount < maxIterations && (
+              <span className="flex-shrink-0 w-2 h-2 bg-green-400 rounded-full animate-pulse" title={`Calculating physics: ${iterationCount}/${maxIterations}`}></span>
+            )}
+          </button>
 
           {/* Highlight Settings Button */}
-          <div className="group">
-            <button
-              onClick={() => setShowHighlightPanel(!showHighlightPanel)}
-              className="w-full px-2 py-2 bg-dark-secondary/90 hover:bg-dark border border-dark rounded-lg text-sm text-slate-300 hover:text-purple-400 transition-colors flex items-center gap-2"
-              title="Highlight & Visual Settings"
-            >
-              <Shapes className="w-4 h-4 flex-shrink-0" />
-              <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden">Highlight</span>
-            </button>
-          </div>
+          <button
+            onClick={() => setShowHighlightPanel(!showHighlightPanel)}
+            className="group w-full px-2 py-2 bg-dark-secondary/90 hover:bg-dark border border-dark rounded-lg text-sm text-slate-300 hover:text-purple-400 transition-colors flex items-center gap-2"
+            title="Highlight & Visual Settings"
+          >
+            <Shapes className="w-4 h-4 flex-shrink-0" />
+            <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden">Highlight</span>
+          </button>
 
           {/* Old panels removed - now using modal panels below */}
           {showPhysicsControls && false && (
@@ -2912,7 +2908,7 @@ export function G6Graph() {
 
       {/* Highlight Settings Modal Panel (Left Side) */}
       {showHighlightPanel && (
-        <aside className="absolute left-0 top-0 h-full w-96 bg-dark-secondary border-r border-dark flex flex-col z-20">
+        <aside className="absolute left-0 top-0 h-full w-96 bg-dark-secondary border-r border-dark flex flex-col z-40">
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-dark bg-dark-tertiary flex-shrink-0">
             <div className="flex items-center gap-2">
@@ -3063,7 +3059,7 @@ export function G6Graph() {
 
       {/* Physics Settings Modal Panel (Right Side) */}
       {showPhysicsPanel && (
-        <aside className="absolute right-0 top-0 h-full w-96 bg-dark-secondary border-l border-dark flex flex-col z-20">
+        <aside className="absolute right-0 top-0 h-full w-96 bg-dark-secondary border-l border-dark flex flex-col z-40">
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-dark bg-dark-tertiary flex-shrink-0">
             <div className="flex items-center gap-2">
