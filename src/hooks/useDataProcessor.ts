@@ -10,7 +10,7 @@ import { toast } from '@/components/ui/Toast'
  */
 export function useDataProcessor() {
   const csvStore = useCSVStore()
-  const { nodes, edges, setNodes, setEdges, setHasRunInitialPhysics } = useGraphStore()
+  const { nodes, edges, setNodes, setEdges } = useGraphStore()
   const { setLoading } = useUIStore()
 
   const processAllFiles = useCallback(() => {
@@ -41,8 +41,6 @@ export function useDataProcessor() {
       // Update stores
       setNodes(allNodes)
       setEdges(allEdges)
-      // Reset physics flag so physics will run for new data
-      setHasRunInitialPhysics(false)
 
       const stubCount = allNodes.filter((n) => n.isStub).length
       toast.success(

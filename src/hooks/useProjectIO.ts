@@ -66,8 +66,6 @@ export function useProjectIO() {
       // Restore graph data
       graphStore.setNodes(state.nodes)
       graphStore.setEdges(state.edges)
-      // Set physics flag to true so physics doesn't auto-run on project load
-      graphStore.setHasRunInitialPhysics(true)
 
       // Restore templates
       state.cardTemplates.forEach((template) => {

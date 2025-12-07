@@ -20,13 +20,11 @@ interface GraphState {
   edges: GraphEdge[]
   metaNodes: MetaNode[]
   physicsModifiers: PhysicsModifiers
-  hasRunInitialPhysics: boolean
 
   // Actions
   setPhysicsModifiers: (modifiers: Partial<PhysicsModifiers>) => void
   setNodes: (nodes: GraphNode[]) => void
   setEdges: (edges: GraphEdge[]) => void
-  setHasRunInitialPhysics: (value: boolean) => void
   addNode: (node: GraphNode) => void
   addEdge: (edge: GraphEdge) => void
   updateNode: (nodeId: string, updates: Partial<GraphNode>) => void
@@ -58,7 +56,6 @@ export const useGraphStore = create<GraphState>()(
     springStrength: 0,
     centerGravity: 0,
   },
-  hasRunInitialPhysics: false,
 
   // Actions
   setPhysicsModifiers: (modifiers) =>
@@ -70,9 +67,6 @@ export const useGraphStore = create<GraphState>()(
 
   setEdges: (edges) =>
     set({ edges }),
-
-  setHasRunInitialPhysics: (value) =>
-    set({ hasRunInitialPhysics: value }),
 
   addNode: (node) =>
     set((state) => ({

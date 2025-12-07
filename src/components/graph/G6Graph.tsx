@@ -47,7 +47,7 @@ function getRGBColor(time: number, speed: number): string {
 export function G6Graph() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const viewportRef = useRef<Viewport | null>(null)
-  const { nodes, edges, metaNodes, hasRunInitialPhysics, setHasRunInitialPhysics } = useGraphStore()
+  const { nodes, edges, metaNodes } = useGraphStore()
   const { setSelectedNodeId, setSelectedMetaNodeId, selectedNodeId, selectedMetaNodeId, filteredNodeIds } = useUIStore()
   const { layoutConfig } = useProjectStore()
   const { getEdgeTemplateById, getDefaultEdgeTemplate, getCardTemplateById } = useTemplateStore()
@@ -358,23 +358,14 @@ export function G6Graph() {
     })
 
     // Reset iteration counter and max iterations to restart physics simulation
-    // When manually rerunning via button, always reset and run physics
     setIterationCount(0)
     setMaxIterations(500)
-    setHasRunInitialPhysics(false) // Reset flag to allow physics to run again
-  }, [nodes, edges, setHasRunInitialPhysics])
+  }, [nodes, edges])
 
   const handleContinuePhysics = useCallback(() => {
     // Add 100 more iterations to continue physics from current state
     setMaxIterations(prev => prev + 100)
   }, [])
-
-  // Set the physics flag to true when physics completes
-  useEffect(() => {
-    if (iterationCount >= maxIterations && !hasRunInitialPhysics) {
-      setHasRunInitialPhysics(true)
-    }
-  }, [iterationCount, maxIterations, hasRunInitialPhysics, setHasRunInitialPhysics])
 
   // Effect to calculate and highlight shortest paths from selected node/meta-node to all stub nodes
   useEffect(() => {
@@ -748,102 +739,88 @@ export function G6Graph() {
         }
       } else {
         // First time initialization
-        // Check if we should skip layout calculation (already ran physics from browser refresh or project load)
-        if (hasRunInitialPhysics) {
-          // Don't run layout calculation - use random positions
-          nodes.forEach((node) => {
-            newPositions.set(node.id, {
-              x: width / 2 + (Math.random() - 0.5) * 200,
-              y: height / 2 + (Math.random() - 0.5) * 200,
-              vx: 0,
-              vy: 0,
-            })
-          })
+        let layoutPositions: Map<string, { x: number; y: number }>
+
+        // If we have meta-nodes (groups), use Fruchterman layout for each group
+        if (metaNodes.length > 0) {
+          layoutPositions = applyGridLayoutToGroups(nodes, edges, metaNodes, width, height)
         } else {
-          // Run full layout calculation (only on first CSV import or manual rerun)
-          let layoutPositions: Map<string, { x: number; y: number }>
-
-          // If we have meta-nodes (groups), use Fruchterman layout for each group
-          if (metaNodes.length > 0) {
-            layoutPositions = applyGridLayoutToGroups(nodes, edges, metaNodes, width, height)
-          } else {
-            // Otherwise use cluster island layout
-            const layoutResult = calculateClusterIslandLayout(nodes, edges, {
-              width,
-              height,
-              iterations: 300,
-              intraClusterAttraction: physicsParams.intraClusterAttraction,
-              intraClusterRepulsion: 3000,
-              leafRadialForce: physicsParams.leafRadialForce,
-              interClusterRepulsion: physicsParams.interClusterRepulsion,
-              minClusterDistance: physicsParams.minClusterDistance,
-              centerGravity: 0.001,
-            })
-            layoutPositions = layoutResult.positions
-          }
-
-          layoutPositions.forEach((pos, nodeId) => {
-            newPositions.set(nodeId, {
-              x: pos.x,
-              y: pos.y,
-              vx: 0,
-              vy: 0,
-            })
+          // Otherwise use cluster island layout
+          const layoutResult = calculateClusterIslandLayout(nodes, edges, {
+            width,
+            height,
+            iterations: 300,
+            intraClusterAttraction: physicsParams.intraClusterAttraction,
+            intraClusterRepulsion: 3000,
+            leafRadialForce: physicsParams.leafRadialForce,
+            interClusterRepulsion: physicsParams.interClusterRepulsion,
+            minClusterDistance: physicsParams.minClusterDistance,
+            centerGravity: 0.001,
           })
+          layoutPositions = layoutResult.positions
+        }
 
-          // Calculate convex hulls for parent-leaf clustering (for hulls button)
-          const hulls = new Map<number, { x: number; y: number }[]>()
-
-          const adjacency = new Map<string, Set<string>>()
-          nodes.forEach(node => adjacency.set(node.id, new Set()))
-          edges.forEach(edge => {
-            adjacency.get(edge.source)?.add(edge.target)
-            adjacency.get(edge.target)?.add(edge.source)
+        layoutPositions.forEach((pos, nodeId) => {
+          newPositions.set(nodeId, {
+            x: pos.x,
+            y: pos.y,
+            vx: 0,
+            vy: 0,
           })
+        })
 
-          const processedNodes = new Set<string>()
-          let hullId = 0
+        // Calculate convex hulls for parent-leaf clustering (for hulls button)
+        const hulls = new Map<number, { x: number; y: number }[]>()
 
-          nodes.forEach(parentNode => {
-            if (processedNodes.has(parentNode.id)) return
+        const adjacency = new Map<string, Set<string>>()
+        nodes.forEach(node => adjacency.set(node.id, new Set()))
+        edges.forEach(edge => {
+          adjacency.get(edge.source)?.add(edge.target)
+          adjacency.get(edge.target)?.add(edge.source)
+        })
 
-            const neighbors = adjacency.get(parentNode.id) || new Set()
+        const processedNodes = new Set<string>()
+        let hullId = 0
 
-            const leafChildren: string[] = []
-            neighbors.forEach(neighborId => {
-              const neighborDegree = adjacency.get(neighborId)?.size || 0
-              if (neighborDegree === 1) {
-                leafChildren.push(neighborId)
-              }
-            })
+        nodes.forEach(parentNode => {
+          if (processedNodes.has(parentNode.id)) return
 
-            if (leafChildren.length > 0) {
-              const groupNodeIds = [parentNode.id, ...leafChildren]
-              const groupPoints = groupNodeIds.map(nodeId => {
-                const pos = layoutPositions.get(nodeId)
-                return pos ? { x: pos.x, y: pos.y } : null
-              }).filter((p): p is { x: number; y: number } => p !== null)
+          const neighbors = adjacency.get(parentNode.id) || new Set()
 
-              if (groupPoints.length >= 3) {
-                const hull = computeConvexHull(groupPoints)
-                const expandedHull = expandHull(hull, 60)
-                hulls.set(hullId++, expandedHull)
-              }
-
-              processedNodes.add(parentNode.id)
-              leafChildren.forEach(leafId => processedNodes.add(leafId))
+          const leafChildren: string[] = []
+          neighbors.forEach(neighborId => {
+            const neighborDegree = adjacency.get(neighborId)?.size || 0
+            if (neighborDegree === 1) {
+              leafChildren.push(neighborId)
             }
           })
 
-          setClusterHulls(hulls)
-        }
+          if (leafChildren.length > 0) {
+            const groupNodeIds = [parentNode.id, ...leafChildren]
+            const groupPoints = groupNodeIds.map(nodeId => {
+              const pos = layoutPositions.get(nodeId)
+              return pos ? { x: pos.x, y: pos.y } : null
+            }).filter((p): p is { x: number; y: number } => p !== null)
+
+            if (groupPoints.length >= 3) {
+              const hull = computeConvexHull(groupPoints)
+              const expandedHull = expandHull(hull, 60)
+              hulls.set(hullId++, expandedHull)
+            }
+
+            processedNodes.add(parentNode.id)
+            leafChildren.forEach(leafId => processedNodes.add(leafId))
+          }
+        })
+
+        setClusterHulls(hulls)
       }
 
       return newPositions
     })
 
     setSwimlanes(new Map())
-  }, [nodes, edges, layoutConfig, physicsParams, metaNodes, hasRunInitialPhysics])
+  }, [nodes, edges, layoutConfig, physicsParams, metaNodes])
 
   // Calculate meta-node positions after node positions are set
   useEffect(() => {
