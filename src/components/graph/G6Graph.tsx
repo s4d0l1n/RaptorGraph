@@ -47,6 +47,7 @@ function getRGBColor(time: number, speed: number): string {
 export function G6Graph() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const viewportRef = useRef<Viewport | null>(null)
+  const canvasDimensionsRef = useRef({ width: 0, height: 0 }) // Track previous dimensions
   const { nodes, edges, metaNodes } = useGraphStore()
   const { setSelectedNodeId, setSelectedMetaNodeId, selectedNodeId, selectedMetaNodeId, filteredNodeIds } = useUIStore()
   const { layoutConfig } = useProjectStore()
@@ -1519,9 +1520,16 @@ export function G6Graph() {
         return updated
       })
 
-      // Set canvas size
-      canvas.width = canvas.offsetWidth
-      canvas.height = canvas.offsetHeight
+      // PERFORMANCE: Only resize canvas when dimensions actually change
+      // Resetting dimensions clears GPU-cached paths, forcing re-rasterization
+      const newWidth = canvas.offsetWidth
+      const newHeight = canvas.offsetHeight
+      if (canvasDimensionsRef.current.width !== newWidth ||
+          canvasDimensionsRef.current.height !== newHeight) {
+        canvas.width = newWidth
+        canvas.height = newHeight
+        canvasDimensionsRef.current = { width: newWidth, height: newHeight }
+      }
 
       // Clear canvas
       ctx.fillStyle = '#0f172a'
