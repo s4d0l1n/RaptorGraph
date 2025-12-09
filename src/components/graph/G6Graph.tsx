@@ -105,11 +105,11 @@ export function G6Graph() {
 
   // Default physics parameters
   const defaultPhysicsParams = {
-    repulsionStrength: 8000,          // How strongly nodes push apart
-    attractionStrength: 0.2,          // How strongly edges pull together
+    repulsionStrength: 15000,         // How strongly nodes push apart
+    attractionStrength: 0.15,         // How strongly edges pull together
     leafSpringStrength: 0.8,          // How tightly leaves stick to parents
     damping: 0.85,                    // Energy loss per frame (0-1)
-    centerGravity: 0.001,             // Weak pull toward canvas center
+    centerGravity: 0.0005,            // Weak pull toward canvas center
     nodeChaosFactor: 0,               // Random variation per node (0-100)
     intraClusterAttraction: 0.05,     // Cluster island layout parameter
     leafRadialForce: 0.3,             // Cluster island layout parameter
@@ -1468,13 +1468,19 @@ export function G6Graph() {
               const chaosAmount = averageRandomFactor * (physicsParams.nodeChaosFactor / 100) * MAX_REPULSION
               repulsionStrength = Math.max(MIN_REPULSION, repulsionStrength + chaosAmount)
 
-              // Leaves get almost no repulsion charge (don't push parent away)
-              if (isLeaf) {
-                repulsionStrength *= 0.02  // 2% strength for leaves
+              // LEAF REPULSION FIX: Only reduce repulsion between leaf and its parent
+              // NOT between leaf and other unconnected nodes (which was causing blob)
+              const areConnected = neighbors.has(otherNode.id)
+              if (areConnected) {
+                // If connected and one is a leaf, reduce repulsion (don't push parent away)
+                if (isLeaf) {
+                  repulsionStrength *= 0.15  // 15% strength for leaf-parent connection
+                }
+                if (otherIsLeaf) {
+                  repulsionStrength *= 0.15  // 15% strength for parent-leaf connection
+                }
               }
-              if (otherIsLeaf) {
-                repulsionStrength *= 0.02  // 2% strength if other is leaf
-              }
+              // If NOT connected, leaves repel normally (this prevents blob formation!)
 
               // FORCE 2b: Leaf-Parent Magnetic Repulsion
               // Nodes with many leaves repel other nodes with leaves
