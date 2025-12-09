@@ -1285,8 +1285,8 @@ export function G6Graph() {
 
         // PHASE 2 OPTIMIZATION: Spatial Hashing for Physics
         // Build spatial hash grid for O(N log N) repulsion instead of O(N²)
-        // Only check nearby nodes within ~500px radius instead of ALL nodes
-        const spatialHash = new SpatialHashGrid(250) // 250px cells
+        // Increased cell size and search radius for dramatic island separation
+        const spatialHash = new SpatialHashGrid(500) // 500px cells (increased from 250px)
         const spatialNodes: SpatialNode[] = nodes.map(node => {
           const pos = prev.get(node.id)
           return {
@@ -1428,7 +1428,8 @@ export function G6Graph() {
           // Leaves get almost no repulsion so they don't push their parent away
           // IMPORTANT: Siblings (nodes sharing a parent) don't repel each other
           // PHASE 2 OPTIMIZATION: Use spatial hash to only check nearby nodes (10x faster than checking all nodes)
-          const nearbyNodes = spatialHash.getNearby(pos.x, pos.y, 500) // Check within 500px radius
+          // INCREASED radius from 500px to 2000px for dramatic island separation
+          const nearbyNodes = spatialHash.getNearby(pos.x, pos.y, 2000) // Check within 2000px radius
           nearbyNodes.forEach(spatialNode => {
             const otherNode = spatialNode.data
             if (otherNode.id === node.id) return
