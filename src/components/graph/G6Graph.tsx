@@ -1,30 +1,17 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
-import { Download, Settings, RotateCcw, RotateCw, Lock, LockOpen, ChevronDown, ChevronUp, Map as MapIcon, Shapes, Info, X } from 'lucide-react'
+import { Download, Settings, RotateCcw, RotateCw, Lock, LockOpen, Map as MapIcon, Shapes, Info, X } from 'lucide-react'
 import { Viewport } from '@/lib/viewport'
 import { useGraphStore } from '@/stores/graphStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useTemplateStore } from '@/stores/templateStore'
 import { useGraphExport } from '@/hooks/useGraphExport'
-import { toast } from '@/components/ui/Toast'
-import { calculateTimelineLayout } from '@/lib/layouts/timelineLayout'
-import { calculateCircleLayout } from '@/lib/layouts/circleLayout'
-import { calculateGridLayout } from '@/lib/layouts/gridLayout'
-import { calculateConcentricLayout } from '@/lib/layouts/concentricLayout'
-import { calculateForceLayout } from '@/lib/layouts/forceLayout'
-import { calculateRadialLayout } from '@/lib/layouts/radialLayout'
-import { calculateHierarchicalLayout } from '@/lib/layouts/hierarchicalLayout'
-import { calculateFruchtermanLayout } from '@/lib/layouts/fruchtermanLayout'
-import { calculateKamadaKawaiLayout } from '@/lib/layouts/kamadaKawaiLayout'
-import { calculateSpectralLayout } from '@/lib/layouts/spectralLayout'
-import { calculateSugiyamaLayout } from '@/lib/layouts/sugiyamaLayout'
 import { calculateClusterIslandLayout } from '@/lib/layouts/clusterIslandLayout'
 import { getVisibleNodesWithGrouping, calculateMetaNodePosition, transformEdgesForGrouping, applyGridLayoutToGroups } from '@/lib/grouping'
 import { evaluateNodeRules, evaluateEdgeRules } from '@/lib/styleEvaluator'
 import { useRulesStore } from '@/stores/rulesStore'
 import { computeConvexHull, expandHull } from '@/lib/convexHull'
 import { Minimap } from './Minimap'
-import { findShortestPath } from '@/lib/graph-algorithms'
 
 interface NodePosition {
   x: number
@@ -92,6 +79,10 @@ export function G6Graph() {
     damping: 0.85,                    // Energy loss per frame (0-1)
     centerGravity: 0.001,             // Weak pull toward canvas center
     nodeChaosFactor: 0,               // Random variation per node (0-100)
+    intraClusterAttraction: 0.05,     // Cluster island layout parameter
+    leafRadialForce: 0.3,             // Cluster island layout parameter
+    interClusterRepulsion: 150000,    // Cluster island layout parameter
+    minClusterDistance: 600,          // Cluster island layout parameter
   }
 
   // Physics parameters - adjustable by user
@@ -568,7 +559,7 @@ export function G6Graph() {
       if (!node) continue;
 
       // Get the card template to determine actual size
-      const cardTemplate = getCardTemplateById(node.cardTemplateId);
+      const cardTemplate = node.cardTemplateId ? getCardTemplateById(node.cardTemplateId) : undefined;
       const sizeMultiplier = cardTemplate?.size || 1;
       const cardWidth = baseCardWidth * sizeMultiplier;
       const cardHeight = baseCardHeight * sizeMultiplier;
@@ -1746,6 +1737,9 @@ export function G6Graph() {
       // EDGE RENDERING WITH HOPS
       // ===================================================================
 
+      // PERFORMANCE: Get visible viewport bounds for culling
+      const viewportBounds = viewportRef.current?.getVisibleBounds()
+
       // Draw edges using transformed edge list (accounts for grouping)
       transformedEdges.forEach((transformedEdge) => {
         if (!transformedEdge.shouldRender) return
@@ -2219,9 +2213,6 @@ export function G6Graph() {
           ctx.fillText(node.label, nodeX, y + nodeCardHeight - 15)
         })
       })
-
-      // PERFORMANCE: Get visible viewport bounds for culling
-      const viewportBounds = viewportRef.current?.getVisibleBounds()
 
       // Draw nodes as cards (only visible nodes)
       visibleNodes.forEach((node) => {

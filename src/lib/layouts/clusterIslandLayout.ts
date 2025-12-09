@@ -10,6 +10,13 @@ export interface ClusterIslandLayoutOptions {
   height: number
   islandSpacing?: number
   innerLayout?: 'circle' | 'grid' | 'force'
+  iterations?: number
+  intraClusterAttraction?: number
+  intraClusterRepulsion?: number
+  leafRadialForce?: number
+  interClusterRepulsion?: number
+  minClusterDistance?: number
+  centerGravity?: number
 }
 
 export interface LayoutResult {

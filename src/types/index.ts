@@ -222,6 +222,8 @@ export interface CardTemplate {
   borderColor: string
   /** Border width in pixels */
   borderWidth: number
+  /** Corner radius for rounded rectangles */
+  cornerRadius?: number
   /** Node shape */
   shape: NodeShape
   /** Transparent shape (only show icon/image) */
@@ -238,6 +240,12 @@ export interface CardTemplate {
   size: number
   /** Auto-fit size to content (prevents label overflow) */
   autoFit?: boolean
+  /** Text color for labels */
+  textColor?: string
+  /** Font size for labels */
+  fontSize?: number
+  /** Font family for labels */
+  fontFamily?: string
   /** Attributes to display */
   attributeDisplays: AttributeDisplay[]
   /** Is this the default template */
@@ -448,6 +456,7 @@ export interface StyleRule {
  * Graph layout types
  */
 export type LayoutType =
+  | 'bigbang'        // Custom physics-based layout with 4-phase simulation
   | 'force'          // Force-directed physics simulation
   | 'hierarchical'   // Hierarchical tree layout (formerly 'tree')
   | 'radial'         // Radial layout from center
@@ -459,8 +468,13 @@ export type LayoutType =
   | 'grid'           // Regular grid layout
   | 'preset'         // Use preset X/Y positions
   | 'fruchterman'    // Fruchterman-Reingold algorithm
-  | 'kamada-kawai'   // Kamada-Kawai algorithm
+  | 'kamadaKawai'    // Kamada-Kawai algorithm (note: camelCase)
+  | 'kamada-kawai'   // Kamada-Kawai algorithm (kebab-case variant)
   | 'spectral'       // Spectral layout
+  | 'tree'           // Tree layout (Sugiyama)
+  | 'sugiyama'       // Sugiyama hierarchical layout
+  | 'random'         // Random positioning
+  | 'clusterIsland'  // Cluster island layout
 
 /**
  * Timeline layout sort options

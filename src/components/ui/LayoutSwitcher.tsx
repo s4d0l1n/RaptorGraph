@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Network, ChevronDown, Zap, FolderOpen } from 'lucide-react'
 import { LayoutPresets } from '@/components/ui/LayoutPresets'
+import type { LayoutType } from '@/types'
 
-export type LayoutType = 'bigbang'
+// Re-export LayoutType for backwards compatibility
+export type { LayoutType }
 
 interface LayoutInfo {
   id: LayoutType

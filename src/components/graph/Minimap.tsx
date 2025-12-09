@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Map } from 'lucide-react'
+import { Map as MapIcon } from 'lucide-react'
 
 interface NodePosition {
   x: number

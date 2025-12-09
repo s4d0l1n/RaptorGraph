@@ -1,5 +1,4 @@
 import type { GraphNode, MetaNode, GroupingConfig, CombinationLayer, GraphEdge } from '@/types'
-import { calculateFruchtermanLayout } from '@/lib/layouts/fruchtermanLayout'
 
 /**
  * Grouping utility functions
