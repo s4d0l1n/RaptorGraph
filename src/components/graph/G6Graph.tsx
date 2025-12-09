@@ -115,6 +115,9 @@ export function G6Graph() {
     leafRadialForce: 0.3,             // Cluster island layout parameter
     interClusterRepulsion: 150000,    // Cluster island layout parameter
     minClusterDistance: 600,          // Cluster island layout parameter
+    repulsionRadius: 2000,            // How far repulsion works (spatial hash radius)
+    hubEdgeStrength: 0.001,           // How strongly hub-to-hub edges pull (0=payout, 1=normal)
+    hubRepulsionBoost: 0.5,           // Extra repulsion for high-degree nodes (0=none, 1=strong)
   }
 
   // Physics parameters - adjustable by user
@@ -1365,9 +1368,9 @@ export function G6Graph() {
               // Think of it like a rope that doesn't pull back
               idealLength = 500  // Doesn't matter much - spring is so weak
 
-              // ULTRA WEAK spring force - just barely keeps them from drifting to infinity
-              // Set to near-zero so repulsion dominates completely
-              springStrength = 0.001 * physicsParams.attractionStrength
+              // Adjustable spring force - use physicsParams.hubEdgeStrength
+              // 0.001 = almost no pull (payout), 1.0 = normal pull
+              springStrength = physicsParams.hubEdgeStrength * physicsParams.attractionStrength
 
               // Result: Hubs push apart with full repulsion force,
               // edges stretch to accommodate without fighting back!
@@ -1428,8 +1431,8 @@ export function G6Graph() {
           // Leaves get almost no repulsion so they don't push their parent away
           // IMPORTANT: Siblings (nodes sharing a parent) don't repel each other
           // PHASE 2 OPTIMIZATION: Use spatial hash to only check nearby nodes (10x faster than checking all nodes)
-          // INCREASED radius from 500px to 2000px for dramatic island separation
-          const nearbyNodes = spatialHash.getNearby(pos.x, pos.y, 2000) // Check within 2000px radius
+          // Radius adjustable via physicsParams.repulsionRadius
+          const nearbyNodes = spatialHash.getNearby(pos.x, pos.y, physicsParams.repulsionRadius)
           nearbyNodes.forEach(spatialNode => {
             const otherNode = spatialNode.data
             if (otherNode.id === node.id) return
@@ -1488,15 +1491,17 @@ export function G6Graph() {
 
               // HUB REPULSION BOOST: High-degree nodes push harder
               // This helps hubs spread far apart and create distinct islands
-              if (!isLeaf && !otherIsLeaf) {
+              // Adjustable via physicsParams.hubRepulsionBoost
+              if (!isLeaf && !otherIsLeaf && physicsParams.hubRepulsionBoost > 0) {
                 const myDegree = nodeDegree
                 const otherDegree = (adjacency.get(otherNode.id) || new Set()).size
                 const avgDegree = (myDegree + otherDegree) / 2
 
                 // Boost increases with degree (hubs push harder)
                 // Square root to keep it reasonable
+                // Multiplied by hubRepulsionBoost parameter (0=none, 1=full)
                 if (avgDegree > 3) {
-                  const hubBoost = 1.0 + Math.sqrt((avgDegree - 3) / 3) * 0.5
+                  const hubBoost = 1.0 + Math.sqrt((avgDegree - 3) / 3) * physicsParams.hubRepulsionBoost
                   repulsionStrength *= hubBoost
                 }
               }
@@ -3535,6 +3540,63 @@ export function G6Graph() {
               />
               <p className="text-xs text-slate-500 mt-1">
                 Positive pulls toward center, negative pushes away
+              </p>
+            </div>
+
+            {/* Repulsion Radius */}
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">
+                Repulsion Radius: {physicsParams.repulsionRadius}px
+              </label>
+              <input
+                type="range"
+                min="500"
+                max="5000"
+                step="100"
+                value={physicsParams.repulsionRadius}
+                onChange={(e) => setPhysicsParams(prev => ({ ...prev, repulsionRadius: Number(e.target.value) }))}
+                className="w-full h-1 bg-dark rounded-lg appearance-none cursor-pointer accent-cyber-500"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                How far nodes can push each other (500=close, 5000=far islands)
+              </p>
+            </div>
+
+            {/* Hub Edge Strength */}
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">
+                Hub Edge Strength: {physicsParams.hubEdgeStrength.toFixed(3)}
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="0.2"
+                step="0.001"
+                value={physicsParams.hubEdgeStrength}
+                onChange={(e) => setPhysicsParams(prev => ({ ...prev, hubEdgeStrength: Number(e.target.value) }))}
+                className="w-full h-1 bg-dark rounded-lg appearance-none cursor-pointer accent-cyber-500"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Hub-to-hub edge pull (0=payout/stretch freely, 0.2=strong pull)
+              </p>
+            </div>
+
+            {/* Hub Repulsion Boost */}
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">
+                Hub Repulsion Boost: {physicsParams.hubRepulsionBoost.toFixed(2)}
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="2.0"
+                step="0.1"
+                value={physicsParams.hubRepulsionBoost}
+                onChange={(e) => setPhysicsParams(prev => ({ ...prev, hubRepulsionBoost: Number(e.target.value) }))}
+                className="w-full h-1 bg-dark rounded-lg appearance-none cursor-pointer accent-cyber-500"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Extra repulsion for high-degree nodes (0=none, 2=very strong)
               </p>
             </div>
 
