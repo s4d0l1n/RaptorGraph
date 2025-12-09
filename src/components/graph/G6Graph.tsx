@@ -138,6 +138,7 @@ export function G6Graph() {
   const [showHighlightSettings, setShowHighlightSettings] = useState(false)
   const [showPhysicsPanel, setShowPhysicsPanel] = useState(false)
   const [showHighlightPanel, setShowHighlightPanel] = useState(false)
+  const [topModal, setTopModal] = useState<'physics' | 'highlight' | null>(null)
 
   // PERFORMANCE OPTIMIZATION: Cache adjacency map and node map
   // These are static data structures that only change when nodes/edges change
@@ -2942,7 +2943,10 @@ export function G6Graph() {
       {/* Physics Settings Button */}
       {nodes.length > 0 && (
         <button
-          onClick={() => setShowPhysicsPanel(!showPhysicsPanel)}
+          onClick={() => {
+            setShowPhysicsPanel(!showPhysicsPanel)
+            setTopModal('physics')
+          }}
           className="group absolute top-28 right-4 px-2 py-2 bg-dark-secondary/90 hover:bg-dark border border-dark rounded-lg text-sm text-slate-300 hover:text-cyber-400 transition-all flex items-center gap-2 overflow-hidden hover:px-3"
           title="Physics Parameters"
         >
@@ -2957,7 +2961,10 @@ export function G6Graph() {
       {/* Highlight Settings Button */}
       {nodes.length > 0 && (
         <button
-          onClick={() => setShowHighlightPanel(!showHighlightPanel)}
+          onClick={() => {
+            setShowHighlightPanel(!showHighlightPanel)
+            setTopModal('highlight')
+          }}
           className="group absolute top-40 right-4 px-2 py-2 bg-dark-secondary/90 hover:bg-dark border border-dark rounded-lg text-sm text-slate-300 hover:text-purple-400 transition-all flex items-center gap-2 overflow-hidden hover:px-3"
           title="Highlight & Visual Settings"
         >
@@ -3022,7 +3029,7 @@ export function G6Graph() {
 
       {/* Highlight Settings Modal Panel (Right Side) */}
       {showHighlightPanel && (
-        <aside className="fixed right-0 top-0 h-screen w-96 bg-dark-secondary border-l border-dark flex flex-col z-40">
+        <aside className={`fixed right-0 top-0 h-screen w-96 bg-dark-secondary border-l border-dark flex flex-col ${topModal === 'highlight' ? 'z-50' : 'z-40'}`}>
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-dark bg-dark-tertiary flex-shrink-0">
             <div className="flex items-center gap-2">
@@ -3173,7 +3180,7 @@ export function G6Graph() {
 
       {/* Physics Settings Modal Panel (Right Side) */}
       {showPhysicsPanel && (
-        <aside className="fixed right-0 top-0 h-screen w-96 bg-dark-secondary border-l border-dark flex flex-col z-40">
+        <aside className={`fixed right-0 top-0 h-screen w-96 bg-dark-secondary border-l border-dark flex flex-col ${topModal === 'physics' ? 'z-50' : 'z-40'}`}>
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-dark bg-dark-tertiary flex-shrink-0">
             <div className="flex items-center gap-2">
