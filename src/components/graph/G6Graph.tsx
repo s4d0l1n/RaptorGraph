@@ -33,9 +33,23 @@ function getRGBColor(time: number, speed: number): string {
  * Enhanced Canvas Graph Visualization with card-style nodes
  */
 export function G6Graph() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  // PERFORMANCE: Layered canvas architecture - separate layers for different content
+  // Only redraw layers that actually changed
+  const backgroundCanvasRef = useRef<HTMLCanvasElement>(null) // Layer 0: Swimlanes, static background
+  const edgeCanvasRef = useRef<HTMLCanvasElement>(null)       // Layer 1: Edges/connections
+  const nodeCanvasRef = useRef<HTMLCanvasElement>(null)       // Layer 2: Nodes/cards
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null)    // Layer 3: Selection highlights, hover effects
+  const canvasRef = useRef<HTMLCanvasElement>(null) // Kept for compatibility, will use overlayCanvasRef
   const viewportRef = useRef<Viewport | null>(null)
   const canvasDimensionsRef = useRef({ width: 0, height: 0 }) // Track previous dimensions
+
+  // Track which layers need to be redrawn
+  const dirtyLayersRef = useRef({
+    background: true,
+    edges: true,
+    nodes: true,
+    overlay: true
+  })
   const { nodes, edges, metaNodes } = useGraphStore()
   const { setSelectedNodeId, setSelectedMetaNodeId, selectedNodeId, selectedMetaNodeId, filteredNodeIds } = useUIStore()
   const { layoutConfig } = useProjectStore()
@@ -68,18 +82,25 @@ export function G6Graph() {
   // State to trigger re-render when viewport changes
   const [viewportState, setViewportState] = useState({ zoom: 1, pan: { x: 0, y: 0 }, rotation: 0 });
 
-  // Initialize viewport
+  // Initialize viewport (use overlay canvas for dimensions/events)
   useEffect(() => {
-    if (canvasRef.current && !viewportRef.current) {
-      viewportRef.current = new Viewport(canvasRef.current);
+    if (overlayCanvasRef.current && !viewportRef.current) {
+      viewportRef.current = new Viewport(overlayCanvasRef.current);
       // Synchronize state for the first render
       setViewportState(viewportRef.current.getTransform());
+      // Also set canvasRef for backwards compatibility
+      canvasRef.current = overlayCanvasRef.current;
     }
   }, []);
 
   // PERFORMANCE: Restart rendering when viewport changes (zoom, pan, rotate)
   useEffect(() => {
     needsRenderRef.current = true
+    // Mark all layers as dirty when viewport changes (all content needs repositioning)
+    dirtyLayersRef.current.background = true
+    dirtyLayersRef.current.edges = true
+    dirtyLayersRef.current.nodes = true
+    dirtyLayersRef.current.overlay = true
   }, [viewportState]);
 
   // Default physics parameters
@@ -104,6 +125,11 @@ export function G6Graph() {
   // PERFORMANCE: Restart rendering when physics are enabled or data changes
   useEffect(() => {
     needsRenderRef.current = true
+    // Mark all layers as dirty when data changes significantly
+    dirtyLayersRef.current.background = true
+    dirtyLayersRef.current.edges = true
+    dirtyLayersRef.current.nodes = true
+    dirtyLayersRef.current.overlay = true
   }, [physicsEnabled, nodes, edges])
 
   // Node deviation factors - each node gets a random multiplier based on chaos factor
@@ -139,6 +165,20 @@ export function G6Graph() {
   const [showPhysicsPanel, setShowPhysicsPanel] = useState(false)
   const [showHighlightPanel, setShowHighlightPanel] = useState(false)
   const [topModal, setTopModal] = useState<'physics' | 'highlight' | null>(null)
+
+  // PERFORMANCE: Mark layers dirty when visual settings change
+  useEffect(() => {
+    needsRenderRef.current = true
+    dirtyLayersRef.current.background = true // Hulls and swimlanes are on background
+  }, [showHulls, swimlanes])
+
+  // PERFORMANCE: Mark layers dirty when selection or highlighting changes
+  useEffect(() => {
+    needsRenderRef.current = true
+    dirtyLayersRef.current.edges = true // Highlighted edges
+    dirtyLayersRef.current.nodes = true // Selected nodes
+    dirtyLayersRef.current.overlay = true // Selection indicators
+  }, [selectedNodeId, highlightedEdgeIds, edgeDistances, highlightEdgeSettings])
 
   // PERFORMANCE OPTIMIZATION: Cache adjacency map and node map
   // These are static data structures that only change when nodes/edges change
@@ -1031,11 +1071,25 @@ export function G6Graph() {
 
   // Render graph - optimized to only render when dependencies change
   useEffect(() => {
-    if (!canvasRef.current || nodes.length === 0 || nodePositions.size === 0) return
+    if (!overlayCanvasRef.current || nodes.length === 0 || nodePositions.size === 0) return
 
-    const canvas = canvasRef.current
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
+    // Get all canvas refs
+    const bgCanvas = backgroundCanvasRef.current
+    const edgeCanvas = edgeCanvasRef.current
+    const nodeCanvas = nodeCanvasRef.current
+    const overlayCanvas = overlayCanvasRef.current
+
+    if (!bgCanvas || !edgeCanvas || !nodeCanvas || !overlayCanvas) return
+
+    const bgCtx = bgCanvas.getContext('2d')
+    const edgeCtx = edgeCanvas.getContext('2d')
+    const nodeCtx = nodeCanvas.getContext('2d')
+    const overlayCtx = overlayCanvas.getContext('2d')
+
+    if (!bgCtx || !edgeCtx || !nodeCtx || !overlayCtx) return
+
+    // Keep legacy canvas ref for compatibility
+    canvasRef.current = overlayCanvas
 
     // Cancel any existing animation frame
     if (animationRef.current) {
@@ -1665,111 +1719,139 @@ export function G6Graph() {
         return updated
       })
 
-      // PERFORMANCE: Only resize canvas when dimensions actually change
+      // PERFORMANCE: Only resize canvases when dimensions actually change
       // Resetting dimensions clears GPU-cached paths, forcing re-rasterization
-      const newWidth = canvas.offsetWidth
-      const newHeight = canvas.offsetHeight
+      const newWidth = overlayCanvas.offsetWidth
+      const newHeight = overlayCanvas.offsetHeight
       if (canvasDimensionsRef.current.width !== newWidth ||
           canvasDimensionsRef.current.height !== newHeight) {
-        canvas.width = newWidth
-        canvas.height = newHeight
+        // Resize all canvases
+        bgCanvas.width = newWidth
+        bgCanvas.height = newHeight
+        edgeCanvas.width = newWidth
+        edgeCanvas.height = newHeight
+        nodeCanvas.width = newWidth
+        nodeCanvas.height = newHeight
+        overlayCanvas.width = newWidth
+        overlayCanvas.height = newHeight
         canvasDimensionsRef.current = { width: newWidth, height: newHeight }
-      }
 
-      // Clear canvas
-      ctx.fillStyle = '#0f172a'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-      // Save context and apply pan/zoom/rotation transformations
-      ctx.save()
-      if (viewportRef.current) {
-        viewportRef.current.applyToContext(ctx)
-      }
-
-      // Draw swimlanes if in timeline mode
-      if (swimlanes.size > 0) {
-        const sortedSwimlanes = Array.from(swimlanes.entries()).sort((a, b) => a[1] - b[1])
-
-        sortedSwimlanes.forEach(([label, yPos], i) => {
-          // Draw swimlane background
-          const swimlaneHeight = i < sortedSwimlanes.length - 1
-            ? sortedSwimlanes[i + 1][1] - yPos
-            : canvas.height - yPos
-
-          ctx.fillStyle = i % 2 === 0 ? '#1e293b' : '#0f172a'
-          ctx.fillRect(0, yPos - swimlaneHeight / 2, canvas.width, swimlaneHeight)
-
-          // Draw swimlane label
-          ctx.fillStyle = '#64748b'
-          ctx.font = '12px sans-serif'
-          ctx.textAlign = 'left'
-          ctx.textBaseline = 'middle'
-          ctx.fillText(label, 10, yPos)
-
-          // Draw horizontal line
-          ctx.strokeStyle = '#334155'
-          ctx.lineWidth = 1
-          ctx.beginPath()
-          ctx.moveTo(0, yPos - swimlaneHeight / 2)
-          ctx.lineTo(canvas.width, yPos - swimlaneHeight / 2)
-          ctx.stroke()
-        })
+        // Mark all layers as dirty when dimensions change
+        dirtyLayersRef.current.background = true
+        dirtyLayersRef.current.edges = true
+        dirtyLayersRef.current.nodes = true
+        dirtyLayersRef.current.overlay = true
       }
 
       // ===================================================================
-      // CLUSTER HULL RENDERING
-      // Draw convex hulls around clusters (if enabled)
+      // LAYERED RENDERING FUNCTIONS
       // ===================================================================
 
-      // Calculate hulls dynamically from current node positions
-      const currentHulls = showHulls ? calculateHullsFromPositions(nodePositions) : new Map()
+      // Layer 0: Background (swimlanes, cluster hulls)
+      const renderBackgroundLayer = () => {
+        if (!dirtyLayersRef.current.background) return
 
-      if (showHulls && currentHulls.size > 0) {
-        // Generate colors for each cluster
-        const clusterColors = [
-          'rgba(6, 182, 212, 0.1)',   // cyan
-          'rgba(168, 85, 247, 0.1)',  // purple
-          'rgba(236, 72, 153, 0.1)',  // pink
-          'rgba(34, 197, 94, 0.1)',   // green
-          'rgba(251, 146, 60, 0.1)',  // orange
-          'rgba(59, 130, 246, 0.1)',  // blue
-        ]
+        // Clear background canvas
+        bgCtx.fillStyle = '#0f172a'
+        bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height)
 
-        const clusterBorderColors = [
-          'rgba(6, 182, 212, 0.4)',   // cyan
-          'rgba(168, 85, 247, 0.4)',  // purple
-          'rgba(236, 72, 153, 0.4)',  // pink
-          'rgba(34, 197, 94, 0.4)',   // green
-          'rgba(251, 146, 60, 0.4)',  // orange
-          'rgba(59, 130, 246, 0.4)',  // blue
-        ]
+        // Save context and apply viewport transform
+        bgCtx.save()
+        if (viewportRef.current) {
+          viewportRef.current.applyToContext(bgCtx)
+        }
 
-        currentHulls.forEach((hullPoints, clusterId) => {
-          if (hullPoints.length < 3) return
+        // Draw swimlanes if in timeline mode
+        if (swimlanes.size > 0) {
+          const sortedSwimlanes = Array.from(swimlanes.entries()).sort((a, b) => a[1] - b[1])
 
-          const colorIndex = clusterId % clusterColors.length
+          sortedSwimlanes.forEach(([label, yPos], i) => {
+            // Draw swimlane background
+            const swimlaneHeight = i < sortedSwimlanes.length - 1
+              ? sortedSwimlanes[i + 1][1] - yPos
+              : bgCanvas.height - yPos
 
-          // Draw filled hull
-          ctx.fillStyle = clusterColors[colorIndex]
-          ctx.strokeStyle = clusterBorderColors[colorIndex]
-          ctx.lineWidth = 2
-          ctx.setLineDash([5, 5])
+            bgCtx.fillStyle = i % 2 === 0 ? '#1e293b' : '#0f172a'
+            bgCtx.fillRect(0, yPos - swimlaneHeight / 2, bgCanvas.width, swimlaneHeight)
 
-          ctx.beginPath()
-          ctx.moveTo(hullPoints[0].x, hullPoints[0].y)
-          for (let i = 1; i < hullPoints.length; i++) {
-            ctx.lineTo(hullPoints[i].x, hullPoints[i].y)
-          }
-          ctx.closePath()
-          ctx.fill()
-          ctx.stroke()
+            // Draw swimlane label
+            bgCtx.fillStyle = '#64748b'
+            bgCtx.font = '12px sans-serif'
+            bgCtx.textAlign = 'left'
+            bgCtx.textBaseline = 'middle'
+            bgCtx.fillText(label, 10, yPos)
 
-          ctx.setLineDash([])
-        })
+            // Draw horizontal line
+            bgCtx.strokeStyle = '#334155'
+            bgCtx.lineWidth = 1
+            bgCtx.beginPath()
+            bgCtx.moveTo(0, yPos - swimlaneHeight / 2)
+            bgCtx.lineTo(bgCanvas.width, yPos - swimlaneHeight / 2)
+            bgCtx.stroke()
+          })
+        }
+
+        // ===================================================================
+        // CLUSTER HULL RENDERING
+        // Draw convex hulls around clusters (if enabled)
+        // ===================================================================
+
+        // Calculate hulls dynamically from current node positions
+        const currentHulls = showHulls ? calculateHullsFromPositions(nodePositions) : new Map()
+
+        if (showHulls && currentHulls.size > 0) {
+          // Generate colors for each cluster
+          const clusterColors = [
+            'rgba(6, 182, 212, 0.1)',   // cyan
+            'rgba(168, 85, 247, 0.1)',  // purple
+            'rgba(236, 72, 153, 0.1)',  // pink
+            'rgba(34, 197, 94, 0.1)',   // green
+            'rgba(251, 146, 60, 0.1)',  // orange
+            'rgba(59, 130, 246, 0.1)',  // blue
+          ]
+
+          const clusterBorderColors = [
+            'rgba(6, 182, 212, 0.4)',   // cyan
+            'rgba(168, 85, 247, 0.4)',  // purple
+            'rgba(236, 72, 153, 0.4)',  // pink
+            'rgba(34, 197, 94, 0.4)',   // green
+            'rgba(251, 146, 60, 0.4)',  // orange
+            'rgba(59, 130, 246, 0.4)',  // blue
+          ]
+
+          currentHulls.forEach((hullPoints, clusterId) => {
+            if (hullPoints.length < 3) return
+
+            const colorIndex = clusterId % clusterColors.length
+
+            // Draw filled hull
+            bgCtx.fillStyle = clusterColors[colorIndex]
+            bgCtx.strokeStyle = clusterBorderColors[colorIndex]
+            bgCtx.lineWidth = 2
+            bgCtx.setLineDash([5, 5])
+
+            bgCtx.beginPath()
+            bgCtx.moveTo(hullPoints[0].x, hullPoints[0].y)
+            for (let i = 1; i < hullPoints.length; i++) {
+              bgCtx.lineTo(hullPoints[i].x, hullPoints[i].y)
+            }
+            bgCtx.closePath()
+            bgCtx.fill()
+            bgCtx.stroke()
+
+            bgCtx.setLineDash([])
+          })
+        }
+
+        // Restore context
+        bgCtx.restore()
+
+        // Mark background layer as clean
+        dirtyLayersRef.current.background = false
       }
 
       // ===================================================================
-      // EDGE CROSSING DETECTION
+      // EDGE CROSSING DETECTION (for hop rendering)
       // Only calculate crossings when physics is settled (performance optimization)
       // ===================================================================
 
@@ -1863,674 +1945,922 @@ export function G6Graph() {
         }
       }
 
-      // ===================================================================
-      // EDGE RENDERING WITH HOPS
-      // ===================================================================
+      // Layer 1: Edges (connections between nodes)
+      const renderEdgeLayer = () => {
+        if (!dirtyLayersRef.current.edges) return
 
-      // PERFORMANCE: Get visible viewport bounds for culling
-      const viewportBounds = viewportRef.current?.getVisibleBounds()
+        // Clear edge canvas with transparency
+        edgeCtx.clearRect(0, 0, edgeCanvas.width, edgeCanvas.height)
 
-      // PHASE 2 OPTIMIZATION: Canvas Path Batching
-      // Group edges by their style properties to reduce state changes
-      // This provides 15-20% speedup by minimizing ctx.strokeStyle/lineWidth changes
-      interface EdgeRenderBatch {
-        edges: Array<{
-          transformedEdge: typeof transformedEdges[0]
-          sourcePos: { x: number; y: number }
-          targetPos: { x: number; y: number }
-        }>
-        color: string
-        width: number
-        opacity: number
-        style: string
-        lineType: string
-        lineDash: number[]
-        lineDashOffset: number
-      }
-
-      const edgeBatches = new Map<string, EdgeRenderBatch>()
-
-      // First pass: Group edges by style (only simple straight edges without animations)
-      transformedEdges.forEach((transformedEdge) => {
-        if (!transformedEdge.shouldRender) return
-
-        const { edge, renderSource, renderTarget, sourceIsMetaNode, targetIsMetaNode } = transformedEdge
-
-        // Skip if either original node is filtered out
-        if (filteredNodeIds) {
-          if (!filteredNodeIds.has(edge.source) || !filteredNodeIds.has(edge.target)) {
-            return
-          }
+        // Save context and apply viewport transform
+        edgeCtx.save()
+        if (viewportRef.current) {
+          viewportRef.current.applyToContext(edgeCtx)
         }
 
-        // Get positions based on whether we're rendering to node or meta-node
-        const sourcePos = sourceIsMetaNode
-          ? metaNodePositions.get(renderSource)
-          : nodePositions.get(renderSource)
+        // PERFORMANCE: Get visible viewport bounds for culling
+        const viewportBounds = viewportRef.current?.getVisibleBounds()
 
-        const targetPos = targetIsMetaNode
-          ? metaNodePositions.get(renderTarget)
-          : nodePositions.get(renderTarget)
+        // PHASE 2 OPTIMIZATION: Canvas Path Batching
+        // Group edges by their style properties to reduce state changes
+        // This provides 15-20% speedup by minimizing edgeCtx.strokeStyle/lineWidth changes
+        interface EdgeRenderBatch {
+          edges: Array<{
+            transformedEdge: typeof transformedEdges[0]
+            sourcePos: { x: number; y: number }
+            targetPos: { x: number; y: number }
+          }>
+          color: string
+          width: number
+          opacity: number
+          style: string
+          lineType: string
+          lineDash: number[]
+          lineDashOffset: number
+        }
 
-        if (sourcePos && targetPos) {
-          // PERFORMANCE: Viewport culling - skip edges completely outside visible area
-          if (viewportBounds) {
-            const edgeLeft = Math.min(sourcePos.x, targetPos.x)
-            const edgeRight = Math.max(sourcePos.x, targetPos.x)
-            const edgeTop = Math.min(sourcePos.y, targetPos.y)
-            const edgeBottom = Math.max(sourcePos.y, targetPos.y)
+        const edgeBatches = new Map<string, EdgeRenderBatch>()
 
-            // Skip if edge bounding box doesn't intersect with viewport
-            if (edgeRight < viewportBounds.left || edgeLeft > viewportBounds.right ||
-                edgeBottom < viewportBounds.top || edgeTop > viewportBounds.bottom) {
-              return // Skip this edge - it's outside viewport
+        // First pass: Group edges by style (only simple straight edges without animations)
+        transformedEdges.forEach((transformedEdge) => {
+          if (!transformedEdge.shouldRender) return
+
+          const { edge, renderSource, renderTarget, sourceIsMetaNode, targetIsMetaNode } = transformedEdge
+
+          // Skip if either original node is filtered out
+          if (filteredNodeIds) {
+            if (!filteredNodeIds.has(edge.source) || !filteredNodeIds.has(edge.target)) {
+              return
             }
           }
 
-          // Get template
-          const cachedTemplate = evaluatedEdgeTemplates.get(edge.id)
-          const templateId = cachedTemplate?.edgeTemplateId || edge.edgeTemplateId
-          const template = templateId
-            ? getEdgeTemplateById(templateId)
-            : getDefaultEdgeTemplate()
+          // Get positions based on whether we're rendering to node or meta-node
+          const sourcePos = sourceIsMetaNode
+            ? metaNodePositions.get(renderSource)
+            : nodePositions.get(renderSource)
 
-          const isHighlighted = highlightedEdgeIds.has(edge.id)
-          const lineType = template?.lineType || 'straight'
-          const hasCrossings = edgeCrossings.has(edge.id)
+          const targetPos = targetIsMetaNode
+            ? metaNodePositions.get(renderTarget)
+            : nodePositions.get(renderTarget)
 
-          // Only batch simple straight edges without highlights or crossings
-          // Complex edges (curved, orthogonal, highlighted, with hops) render individually
-          if (lineType === 'straight' && !isHighlighted && !hasCrossings) {
-            const edgeColor = template?.color || '#475569'
-            const edgeWidth = template?.width || 2
-            const edgeOpacity = template?.opacity ?? 1
-            const edgeStyle = template?.style || 'solid'
+          if (sourcePos && targetPos) {
+            // PERFORMANCE: Viewport culling - skip edges completely outside visible area
+            if (viewportBounds) {
+              const edgeLeft = Math.min(sourcePos.x, targetPos.x)
+              const edgeRight = Math.max(sourcePos.x, targetPos.x)
+              const edgeTop = Math.min(sourcePos.y, targetPos.y)
+              const edgeBottom = Math.max(sourcePos.y, targetPos.y)
 
-            let lineDash: number[] = []
-            if (edgeStyle === 'dashed') {
-              lineDash = [10, 5]
-            } else if (edgeStyle === 'dotted') {
-              lineDash = [2, 4]
+              // Skip if edge bounding box doesn't intersect with viewport
+              if (edgeRight < viewportBounds.left || edgeLeft > viewportBounds.right ||
+                  edgeBottom < viewportBounds.top || edgeTop > viewportBounds.bottom) {
+                return // Skip this edge - it's outside viewport
+              }
             }
 
-            // Create batch key from style properties
-            const batchKey = `${edgeColor}-${edgeWidth}-${edgeOpacity}-${edgeStyle}`
+            // Get template
+            const cachedTemplate = evaluatedEdgeTemplates.get(edge.id)
+            const templateId = cachedTemplate?.edgeTemplateId || edge.edgeTemplateId
+            const template = templateId
+              ? getEdgeTemplateById(templateId)
+              : getDefaultEdgeTemplate()
 
-            if (!edgeBatches.has(batchKey)) {
-              edgeBatches.set(batchKey, {
-                edges: [],
-                color: edgeColor,
-                width: edgeWidth,
-                opacity: edgeOpacity,
-                style: edgeStyle,
-                lineType,
-                lineDash,
-                lineDashOffset: 0
+            const isHighlighted = highlightedEdgeIds.has(edge.id)
+            const lineType = template?.lineType || 'straight'
+            const hasCrossings = edgeCrossings.has(edge.id)
+
+            // Only batch simple straight edges without highlights or crossings
+            // Complex edges (curved, orthogonal, highlighted, with hops) render individually
+            if (lineType === 'straight' && !isHighlighted && !hasCrossings) {
+              const edgeColor = template?.color || '#475569'
+              const edgeWidth = template?.width || 2
+              const edgeOpacity = template?.opacity ?? 1
+              const edgeStyle = template?.style || 'solid'
+
+              let lineDash: number[] = []
+              if (edgeStyle === 'dashed') {
+                lineDash = [10, 5]
+              } else if (edgeStyle === 'dotted') {
+                lineDash = [2, 4]
+              }
+
+              // Create batch key from style properties
+              const batchKey = `${edgeColor}-${edgeWidth}-${edgeOpacity}-${edgeStyle}`
+
+              if (!edgeBatches.has(batchKey)) {
+                edgeBatches.set(batchKey, {
+                  edges: [],
+                  color: edgeColor,
+                  width: edgeWidth,
+                  opacity: edgeOpacity,
+                  style: edgeStyle,
+                  lineType,
+                  lineDash,
+                  lineDashOffset: 0
+                })
+              }
+
+              edgeBatches.get(batchKey)!.edges.push({
+                transformedEdge,
+                sourcePos,
+                targetPos
               })
             }
-
-            edgeBatches.get(batchKey)!.edges.push({
-              transformedEdge,
-              sourcePos,
-              targetPos
-            })
           }
-        }
-      })
-
-      // Second pass: Draw batched edges (grouped by style)
-      edgeBatches.forEach((batch) => {
-        // Set style once for the entire batch
-        ctx.strokeStyle = batch.color
-        ctx.lineWidth = batch.width
-        ctx.globalAlpha = batch.opacity
-        ctx.setLineDash(batch.lineDash)
-        ctx.lineDashOffset = batch.lineDashOffset
-
-        // Draw all edges in this batch
-        batch.edges.forEach(({ sourcePos, targetPos }) => {
-          ctx.beginPath()
-          ctx.moveTo(sourcePos.x, sourcePos.y)
-          ctx.lineTo(targetPos.x, targetPos.y)
-          ctx.stroke()
         })
 
-        // Reset line dash
-        ctx.setLineDash([])
-        ctx.globalAlpha = 1
-      })
+        // Second pass: Draw batched edges (grouped by style)
+        edgeBatches.forEach((batch) => {
+          // Set style once for the entire batch
+          edgeCtx.strokeStyle = batch.color
+          edgeCtx.lineWidth = batch.width
+          edgeCtx.globalAlpha = batch.opacity
+          edgeCtx.setLineDash(batch.lineDash)
+          edgeCtx.lineDashOffset = batch.lineDashOffset
 
-      // Third pass: Draw complex edges individually (curved, orthogonal, highlighted, with hops)
-      transformedEdges.forEach((transformedEdge) => {
-        if (!transformedEdge.shouldRender) return
-
-        const { edge, renderSource, renderTarget, sourceIsMetaNode, targetIsMetaNode } = transformedEdge
-
-        // Skip if either original node is filtered out
-        if (filteredNodeIds) {
-          if (!filteredNodeIds.has(edge.source) || !filteredNodeIds.has(edge.target)) {
-            return
-          }
-        }
-
-        // Get positions based on whether we're rendering to node or meta-node
-        const sourcePos = sourceIsMetaNode
-          ? metaNodePositions.get(renderSource)
-          : nodePositions.get(renderSource)
-
-        const targetPos = targetIsMetaNode
-          ? metaNodePositions.get(renderTarget)
-          : nodePositions.get(renderTarget)
-
-        if (sourcePos && targetPos) {
-          // PERFORMANCE: Viewport culling - skip edges completely outside visible area
-          if (viewportBounds) {
-            const edgeLeft = Math.min(sourcePos.x, targetPos.x)
-            const edgeRight = Math.max(sourcePos.x, targetPos.x)
-            const edgeTop = Math.min(sourcePos.y, targetPos.y)
-            const edgeBottom = Math.max(sourcePos.y, targetPos.y)
-
-            // Skip if edge bounding box doesn't intersect with viewport
-            if (edgeRight < viewportBounds.left || edgeLeft > viewportBounds.right ||
-                edgeBottom < viewportBounds.top || edgeTop > viewportBounds.bottom) {
-              return // Skip this edge - it's outside viewport
-            }
-          }
-          // PHASE 2 OPTIMIZATION: Use cached template evaluation results
-          const cachedTemplate = evaluatedEdgeTemplates.get(edge.id)
-          const templateId = cachedTemplate?.edgeTemplateId || edge.edgeTemplateId
-          const template = templateId
-            ? getEdgeTemplateById(templateId)
-            : getDefaultEdgeTemplate()
-
-          const lineType = template?.lineType || 'straight'
-          const hasCrossings = edgeCrossings.has(edge.id)
-
-          // Check if this edge is highlighted (shortest path from selected node to non-leaf nodes)
-          const isHighlighted = highlightedEdgeIds.has(edge.id)
-
-          // Skip simple straight edges without highlights or crossings (already batched)
-          if (lineType === 'straight' && !isHighlighted && !hasCrossings) {
-            return // Already drawn in batch
-          }
-
-          // Calculate opacity and width based on distance from selected node (gradient effect)
-          let highlightOpacity = 1
-          let highlightWidth = highlightEdgeSettings.width
-          if (isHighlighted) {
-            const distance = edgeDistances.get(edge.id) || 1
-
-            // Color fade: Fade from 1.0 (distance 1) to 0.3 (distance 5+)
-            if (highlightEdgeSettings.colorFade) {
-              highlightOpacity = Math.max(0.3, 1.0 - (distance - 1) * 0.15)
-            }
-
-            // Size fade: Fade from full width (distance 1) to half width (distance 5+)
-            if (highlightEdgeSettings.sizeFade) {
-              const fadeFactor = Math.max(0.5, 1.0 - (distance - 1) * 0.1)
-              highlightWidth = highlightEdgeSettings.width * fadeFactor
-            }
-          }
-
-          // Apply template or use defaults, with highlighting override
-          const edgeColor = isHighlighted ? highlightEdgeSettings.color : (template?.color || '#475569')
-          const edgeWidth = isHighlighted ? highlightWidth : (template?.width || 2)
-          const edgeOpacity = isHighlighted ? highlightOpacity : (template?.opacity ?? 1)
-          const edgeStyle = template?.style || 'solid'
-          // lineType already declared above for batching logic
-          const arrowType = template?.arrowType || 'default'
-          const arrowPosition = template?.arrowPosition || 'end'
-          const edgeLabel = template?.label || edge.label
-
-          // Set line dash array based on style
-          if (isHighlighted && highlightEdgeSettings.animation) {
-            // Animated dashed line for flow effect
-            const flowDirection = edgeFlowDirections.get(edge.id) ?? true
-            // Flow outward from selected node (forward = positive offset, reverse = negative offset)
-            const flowMultiplier = flowDirection ? 1 : -1
-            ctx.setLineDash([20, 10])
-            ctx.lineDashOffset = flowMultiplier * animationTime * 15 // Much faster flow (15x speed)
-          } else if (edgeStyle === 'dashed') {
-            ctx.setLineDash([10, 5])
-            ctx.lineDashOffset = 0
-          } else if (edgeStyle === 'dotted') {
-            ctx.setLineDash([2, 4])
-            ctx.lineDashOffset = 0
-          } else {
-            ctx.setLineDash([])
-            ctx.lineDashOffset = 0
-          }
-
-          // Draw edge line based on line type
-          ctx.strokeStyle = edgeColor
-          ctx.lineWidth = edgeWidth
-          ctx.globalAlpha = edgeOpacity
-
-          const nodeRadius = 30
-
-          // Draw line based on type
-          if (lineType === 'curved') {
-            // Bezier curve
-            const controlX = (sourcePos.x + targetPos.x) / 2
-            const controlY = (sourcePos.y + targetPos.y) / 2
-            const dx = targetPos.x - sourcePos.x
-            const dy = targetPos.y - sourcePos.y
-            const distance = Math.sqrt(dx * dx + dy * dy)
-            const curvature = 0.2
-            const offsetX = -dy * curvature * (distance / 200)
-            const offsetY = dx * curvature * (distance / 200)
-
-            ctx.beginPath()
-            ctx.moveTo(sourcePos.x, sourcePos.y)
-            ctx.quadraticCurveTo(
-              controlX + offsetX,
-              controlY + offsetY,
-              targetPos.x,
-              targetPos.y
-            )
-            ctx.stroke()
-          } else if (lineType === 'orthogonal') {
-            // 90-degree turns
-            const midX = (sourcePos.x + targetPos.x) / 2
-            ctx.beginPath()
-            ctx.moveTo(sourcePos.x, sourcePos.y)
-            ctx.lineTo(midX, sourcePos.y)
-            ctx.lineTo(midX, targetPos.y)
-            ctx.lineTo(targetPos.x, targetPos.y)
-            ctx.stroke()
-          } else {
-            // Straight line (default) - with hop arcs at crossings
-            const crossings = edgeCrossings.get(edge.id) || []
-
-            if (crossings.length === 0) {
-              // No crossings - draw normal line
-              ctx.beginPath()
-              ctx.moveTo(sourcePos.x, sourcePos.y)
-              ctx.lineTo(targetPos.x, targetPos.y)
-              ctx.stroke()
-            } else {
-              // Has crossings - draw line with hop arcs
-              const hopRadius = 8 // Size of the hop arc
-
-              // Calculate line direction
-              const dx = targetPos.x - sourcePos.x
-              const dy = targetPos.y - sourcePos.y
-              const lineLength = Math.sqrt(dx * dx + dy * dy)
-              const dirX = dx / lineLength
-              const dirY = dy / lineLength
-
-              // Sort crossings by distance along the line
-              const sortedCrossings = crossings.map(crossing => {
-                const distAlongLine = (crossing.x - sourcePos.x) * dirX + (crossing.y - sourcePos.y) * dirY
-                return { ...crossing, distAlongLine }
-              }).sort((a, b) => a.distAlongLine - b.distAlongLine)
-
-              // Draw line segments between crossings with arcs
-              ctx.beginPath()
-              ctx.moveTo(sourcePos.x, sourcePos.y)
-
-              sortedCrossings.forEach(crossing => {
-                // Calculate perpendicular direction for arc
-                const perpX = -dirY
-                const perpY = dirX
-
-                // Points before and after the crossing
-                const beforeX = crossing.x - dirX * hopRadius
-                const beforeY = crossing.y - dirY * hopRadius
-                const afterX = crossing.x + dirX * hopRadius
-                const afterY = crossing.y + dirY * hopRadius
-
-                // Arc peak point (perpendicular to line)
-                const arcX = crossing.x + perpX * hopRadius
-                const arcY = crossing.y + perpY * hopRadius
-
-                // Draw to before crossing
-                ctx.lineTo(beforeX, beforeY)
-
-                // Draw arc over crossing
-                ctx.quadraticCurveTo(arcX, arcY, afterX, afterY)
-              })
-
-              // Draw final segment to target
-              ctx.lineTo(targetPos.x, targetPos.y)
-              ctx.stroke()
-            }
-          }
+          // Draw all edges in this batch
+          batch.edges.forEach(({ sourcePos, targetPos }) => {
+            edgeCtx.beginPath()
+            edgeCtx.moveTo(sourcePos.x, sourcePos.y)
+            edgeCtx.lineTo(targetPos.x, targetPos.y)
+            edgeCtx.stroke()
+          })
 
           // Reset line dash
-          ctx.setLineDash([])
-
-          // Helper function to draw arrow at a position
-          const drawArrow = (x: number, y: number, angle: number) => {
-            ctx.fillStyle = edgeColor
-
-            if (arrowType === 'default') {
-              const arrowSize = 8
-              ctx.beginPath()
-              ctx.moveTo(x, y)
-              ctx.lineTo(
-                x - arrowSize * Math.cos(angle - Math.PI / 6),
-                y - arrowSize * Math.sin(angle - Math.PI / 6)
-              )
-              ctx.lineTo(
-                x - arrowSize * Math.cos(angle + Math.PI / 6),
-                y - arrowSize * Math.sin(angle + Math.PI / 6)
-              )
-              ctx.closePath()
-              ctx.fill()
-            } else if (arrowType === 'triangle') {
-              const arrowSize = 12
-              ctx.beginPath()
-              ctx.moveTo(x, y)
-              ctx.lineTo(
-                x - arrowSize * Math.cos(angle - Math.PI / 8),
-                y - arrowSize * Math.sin(angle - Math.PI / 8)
-              )
-              ctx.lineTo(
-                x - arrowSize * Math.cos(angle + Math.PI / 8),
-                y - arrowSize * Math.sin(angle + Math.PI / 8)
-              )
-              ctx.closePath()
-              ctx.fill()
-            } else if (arrowType === 'circle') {
-              const circleRadius = 4
-              ctx.beginPath()
-              ctx.arc(x, y, circleRadius, 0, Math.PI * 2)
-              ctx.fill()
-            }
-          }
-
-          // Draw arrows based on arrow position
-          if (arrowType !== 'none' && arrowPosition !== 'none') {
-            const angle = Math.atan2(targetPos.y - sourcePos.y, targetPos.x - sourcePos.x)
-
-            // Draw arrow at end (target)
-            if (arrowPosition === 'end' || arrowPosition === 'both') {
-              const endX = targetPos.x - nodeRadius * Math.cos(angle)
-              const endY = targetPos.y - nodeRadius * Math.sin(angle)
-              drawArrow(endX, endY, angle)
-            }
-
-            // Draw arrow at start (source)
-            if (arrowPosition === 'start' || arrowPosition === 'both') {
-              const startX = sourcePos.x + nodeRadius * Math.cos(angle)
-              const startY = sourcePos.y + nodeRadius * Math.sin(angle)
-              drawArrow(startX, startY, angle + Math.PI) // Reverse direction
-            }
-          }
-
-          // Draw label if present
-          if (edgeLabel) {
-            const midX = (sourcePos.x + targetPos.x) / 2
-            const midY = (sourcePos.y + targetPos.y) / 2
-
-            ctx.fillStyle = '#e2e8f0'
-            ctx.font = '11px sans-serif'
-            ctx.textAlign = 'center'
-            ctx.textBaseline = 'middle'
-            ctx.fillText(edgeLabel, midX, midY - 10)
-          }
-
-          // Reset global alpha
-          ctx.globalAlpha = 1
-        }
-      })
-
-      // Draw meta-nodes
-      visibleMetaNodes.forEach((metaNode) => {
-        const pos = metaNodePositions.get(metaNode.id)
-        if (!pos) return
-
-        // PERFORMANCE: Viewport culling for meta-nodes
-        // Meta-nodes can be large, use generous margin
-        const metaNodeMargin = 500
-        if (viewportBounds) {
-          if (pos.x + metaNodeMargin < viewportBounds.left || pos.x - metaNodeMargin > viewportBounds.right ||
-              pos.y + metaNodeMargin < viewportBounds.top || pos.y - metaNodeMargin > viewportBounds.bottom) {
-            return // Skip this meta-node - it's outside viewport
-          }
-        }
-
-        if (!metaNode.collapsed) {
-          // Expanded meta-nodes no longer show a badge - they are invisible
-          // This forces all groupings to be shown as collapsed containers with grid layout
-          return // Skip rendering - nodes are shown ungrouped
-        }
-
-        // Draw collapsed meta-node - showing contained nodes with full styling
-
-        // Get contained nodes (filter by search if active)
-        let containedNodes = nodes.filter((n) => metaNode.childNodeIds.includes(n.id))
-        if (filteredNodeIds && filteredNodeIds.size > 0) {
-          containedNodes = containedNodes.filter((n) => filteredNodeIds.has(n.id))
-        }
-
-        // Calculate layout for contained nodes (grid layout)
-        // Use wider rectangles instead of squares for better visual organization
-        const nodeCount = containedNodes.length
-        const cols = Math.min(6, Math.ceil(Math.sqrt(nodeCount * 1.5))) // Wider rectangles
-        const rows = Math.ceil(nodeCount / cols)
-
-        // Use base card dimensions (will be adjusted per node based on their templates)
-        const baseCardWidth = 120
-        const baseCardHeight = 60
-        const spacing = 15
-        const padding = 25
-        const headerHeight = 0 // No header - removed blue label
-
-        // For container sizing, use maximum size multiplier among contained nodes
-        let maxSizeMultiplier = 1
-        containedNodes.forEach((node) => {
-          // PHASE 2 OPTIMIZATION: Use cached template evaluation results
-          const cachedTemplate = evaluatedNodeTemplates.get(node.id)
-          const templateId = cachedTemplate?.cardTemplateId || node.cardTemplateId
-          const cardTemplate = templateId ? getCardTemplateById(templateId) : undefined
-          const sizeMultiplier = cardTemplate?.size || 1
-          maxSizeMultiplier = Math.max(maxSizeMultiplier, sizeMultiplier)
+          edgeCtx.setLineDash([])
+          edgeCtx.globalAlpha = 1
         })
 
-        const cardWidth = baseCardWidth * maxSizeMultiplier
-        const cardHeight = baseCardHeight * maxSizeMultiplier
+        // Third pass: Draw complex edges individually (curved, orthogonal, highlighted, with hops)
+        transformedEdges.forEach((transformedEdge) => {
+          if (!transformedEdge.shouldRender) return
 
-        const containerWidth = Math.max(200, cols * (cardWidth + spacing) - spacing + padding * 2)
-        const containerHeight = rows * (cardHeight + spacing) - spacing + padding * 2 + headerHeight
+          const { edge, renderSource, renderTarget, sourceIsMetaNode, targetIsMetaNode } = transformedEdge
 
-        const containerX = pos.x - containerWidth / 2
-        const containerY = pos.y - containerHeight / 2
-        const radius = 12
+          // Skip if either original node is filtered out
+          if (filteredNodeIds) {
+            if (!filteredNodeIds.has(edge.source) || !filteredNodeIds.has(edge.target)) {
+              return
+            }
+          }
 
-        // Draw container background
-        ctx.fillStyle = '#0f172a'
-        ctx.strokeStyle = '#3b82f6'
-        ctx.lineWidth = 4
+          // Get positions based on whether we're rendering to node or meta-node
+          const sourcePos = sourceIsMetaNode
+            ? metaNodePositions.get(renderSource)
+            : nodePositions.get(renderSource)
 
-        ctx.beginPath()
-        ctx.moveTo(containerX + radius, containerY)
-        ctx.lineTo(containerX + containerWidth - radius, containerY)
-        ctx.quadraticCurveTo(containerX + containerWidth, containerY, containerX + containerWidth, containerY + radius)
-        ctx.lineTo(containerX + containerWidth, containerY + containerHeight - radius)
-        ctx.quadraticCurveTo(containerX + containerWidth, containerY + containerHeight, containerX + containerWidth - radius, containerY + containerHeight)
-        ctx.lineTo(containerX + radius, containerY + containerHeight)
-        ctx.quadraticCurveTo(containerX, containerY + containerHeight, containerX, containerY + containerHeight - radius)
-        ctx.lineTo(containerX, containerY + radius)
-        ctx.quadraticCurveTo(containerX, containerY, containerX + radius, containerY)
-        ctx.closePath()
-        ctx.fill()
-        ctx.stroke()
+          const targetPos = targetIsMetaNode
+            ? metaNodePositions.get(renderTarget)
+            : nodePositions.get(renderTarget)
 
-        // Header removed - no blue label displayed
+          if (sourcePos && targetPos) {
+            // PERFORMANCE: Viewport culling - skip edges completely outside visible area
+            if (viewportBounds) {
+              const edgeLeft = Math.min(sourcePos.x, targetPos.x)
+              const edgeRight = Math.max(sourcePos.x, targetPos.x)
+              const edgeTop = Math.min(sourcePos.y, targetPos.y)
+              const edgeBottom = Math.max(sourcePos.y, targetPos.y)
 
-        // Draw each contained node with full card styling
-        const startX = containerX + padding
-        const startY = containerY + headerHeight + padding
+              // Skip if edge bounding box doesn't intersect with viewport
+              if (edgeRight < viewportBounds.left || edgeLeft > viewportBounds.right ||
+                  edgeBottom < viewportBounds.top || edgeTop > viewportBounds.bottom) {
+                return // Skip this edge - it's outside viewport
+              }
+            }
+            // PHASE 2 OPTIMIZATION: Use cached template evaluation results
+            const cachedTemplate = evaluatedEdgeTemplates.get(edge.id)
+            const templateId = cachedTemplate?.edgeTemplateId || edge.edgeTemplateId
+            const template = templateId
+              ? getEdgeTemplateById(templateId)
+              : getDefaultEdgeTemplate()
 
-        containedNodes.forEach((node, idx) => {
-          const row = Math.floor(idx / cols)
-          const col = idx % cols
-          const nodeX = startX + col * (cardWidth + spacing) + cardWidth / 2
-          const nodeY = startY + row * (cardHeight + spacing) + cardHeight / 2
+            const lineType = template?.lineType || 'straight'
+            const hasCrossings = edgeCrossings.has(edge.id)
+
+            // Check if this edge is highlighted (shortest path from selected node to non-leaf nodes)
+            const isHighlighted = highlightedEdgeIds.has(edge.id)
+
+            // Skip simple straight edges without highlights or crossings (already batched)
+            if (lineType === 'straight' && !isHighlighted && !hasCrossings) {
+              return // Already drawn in batch
+            }
+
+            // Calculate opacity and width based on distance from selected node (gradient effect)
+            let highlightOpacity = 1
+            let highlightWidth = highlightEdgeSettings.width
+            if (isHighlighted) {
+              const distance = edgeDistances.get(edge.id) || 1
+
+              // Color fade: Fade from 1.0 (distance 1) to 0.3 (distance 5+)
+              if (highlightEdgeSettings.colorFade) {
+                highlightOpacity = Math.max(0.3, 1.0 - (distance - 1) * 0.15)
+              }
+
+              // Size fade: Fade from full width (distance 1) to half width (distance 5+)
+              if (highlightEdgeSettings.sizeFade) {
+                const fadeFactor = Math.max(0.5, 1.0 - (distance - 1) * 0.1)
+                highlightWidth = highlightEdgeSettings.width * fadeFactor
+              }
+            }
+
+            // Apply template or use defaults, with highlighting override
+            const edgeColor = isHighlighted ? highlightEdgeSettings.color : (template?.color || '#475569')
+            const edgeWidth = isHighlighted ? highlightWidth : (template?.width || 2)
+            const edgeOpacity = isHighlighted ? highlightOpacity : (template?.opacity ?? 1)
+            const edgeStyle = template?.style || 'solid'
+            // lineType already declared above for batching logic
+            const arrowType = template?.arrowType || 'default'
+            const arrowPosition = template?.arrowPosition || 'end'
+            const edgeLabel = template?.label || edge.label
+
+            // Set line dash array based on style
+            if (isHighlighted && highlightEdgeSettings.animation) {
+              // Animated dashed line for flow effect
+              const flowDirection = edgeFlowDirections.get(edge.id) ?? true
+              // Flow outward from selected node (forward = positive offset, reverse = negative offset)
+              const flowMultiplier = flowDirection ? 1 : -1
+              edgeCtx.setLineDash([20, 10])
+              edgeCtx.lineDashOffset = flowMultiplier * animationTime * 15 // Much faster flow (15x speed)
+            } else if (edgeStyle === 'dashed') {
+              edgeCtx.setLineDash([10, 5])
+              edgeCtx.lineDashOffset = 0
+            } else if (edgeStyle === 'dotted') {
+              edgeCtx.setLineDash([2, 4])
+              edgeCtx.lineDashOffset = 0
+            } else {
+              edgeCtx.setLineDash([])
+              edgeCtx.lineDashOffset = 0
+            }
+
+            // Draw edge line based on line type
+            edgeCtx.strokeStyle = edgeColor
+            edgeCtx.lineWidth = edgeWidth
+            edgeCtx.globalAlpha = edgeOpacity
+
+            const nodeRadius = 30
+
+            // Draw line based on type
+            if (lineType === 'curved') {
+              // Bezier curve
+              const controlX = (sourcePos.x + targetPos.x) / 2
+              const controlY = (sourcePos.y + targetPos.y) / 2
+              const dx = targetPos.x - sourcePos.x
+              const dy = targetPos.y - sourcePos.y
+              const distance = Math.sqrt(dx * dx + dy * dy)
+              const curvature = 0.2
+              const offsetX = -dy * curvature * (distance / 200)
+              const offsetY = dx * curvature * (distance / 200)
+
+              edgeCtx.beginPath()
+              edgeCtx.moveTo(sourcePos.x, sourcePos.y)
+              edgeCtx.quadraticCurveTo(
+                controlX + offsetX,
+                controlY + offsetY,
+                targetPos.x,
+                targetPos.y
+              )
+              edgeCtx.stroke()
+            } else if (lineType === 'orthogonal') {
+              // 90-degree turns
+              const midX = (sourcePos.x + targetPos.x) / 2
+              edgeCtx.beginPath()
+              edgeCtx.moveTo(sourcePos.x, sourcePos.y)
+              edgeCtx.lineTo(midX, sourcePos.y)
+              edgeCtx.lineTo(midX, targetPos.y)
+              edgeCtx.lineTo(targetPos.x, targetPos.y)
+              edgeCtx.stroke()
+            } else {
+              // Straight line (default) - with hop arcs at crossings
+              const crossings = edgeCrossings.get(edge.id) || []
+
+              if (crossings.length === 0) {
+                // No crossings - draw normal line
+                edgeCtx.beginPath()
+                edgeCtx.moveTo(sourcePos.x, sourcePos.y)
+                edgeCtx.lineTo(targetPos.x, targetPos.y)
+                edgeCtx.stroke()
+              } else {
+                // Has crossings - draw line with hop arcs
+                const hopRadius = 8 // Size of the hop arc
+
+                // Calculate line direction
+                const dx = targetPos.x - sourcePos.x
+                const dy = targetPos.y - sourcePos.y
+                const lineLength = Math.sqrt(dx * dx + dy * dy)
+                const dirX = dx / lineLength
+                const dirY = dy / lineLength
+
+                // Sort crossings by distance along the line
+                const sortedCrossings = crossings.map(crossing => {
+                  const distAlongLine = (crossing.x - sourcePos.x) * dirX + (crossing.y - sourcePos.y) * dirY
+                  return { ...crossing, distAlongLine }
+                }).sort((a, b) => a.distAlongLine - b.distAlongLine)
+
+                // Draw line segments between crossings with arcs
+                edgeCtx.beginPath()
+                edgeCtx.moveTo(sourcePos.x, sourcePos.y)
+
+                sortedCrossings.forEach(crossing => {
+                  // Calculate perpendicular direction for arc
+                  const perpX = -dirY
+                  const perpY = dirX
+
+                  // Points before and after the crossing
+                  const beforeX = crossing.x - dirX * hopRadius
+                  const beforeY = crossing.y - dirY * hopRadius
+                  const afterX = crossing.x + dirX * hopRadius
+                  const afterY = crossing.y + dirY * hopRadius
+
+                  // Arc peak point (perpendicular to line)
+                  const arcX = crossing.x + perpX * hopRadius
+                  const arcY = crossing.y + perpY * hopRadius
+
+                  // Draw to before crossing
+                  edgeCtx.lineTo(beforeX, beforeY)
+
+                  // Draw arc over crossing
+                  edgeCtx.quadraticCurveTo(arcX, arcY, afterX, afterY)
+                })
+
+                // Draw final segment to target
+                edgeCtx.lineTo(targetPos.x, targetPos.y)
+                edgeCtx.stroke()
+              }
+            }
+
+            // Reset line dash
+            edgeCtx.setLineDash([])
+
+            // Helper function to draw arrow at a position
+            const drawArrow = (x: number, y: number, angle: number) => {
+              edgeCtx.fillStyle = edgeColor
+
+              if (arrowType === 'default') {
+                const arrowSize = 8
+                edgeCtx.beginPath()
+                edgeCtx.moveTo(x, y)
+                edgeCtx.lineTo(
+                  x - arrowSize * Math.cos(angle - Math.PI / 6),
+                  y - arrowSize * Math.sin(angle - Math.PI / 6)
+                )
+                edgeCtx.lineTo(
+                  x - arrowSize * Math.cos(angle + Math.PI / 6),
+                  y - arrowSize * Math.sin(angle + Math.PI / 6)
+                )
+                edgeCtx.closePath()
+                edgeCtx.fill()
+              } else if (arrowType === 'triangle') {
+                const arrowSize = 12
+                edgeCtx.beginPath()
+                edgeCtx.moveTo(x, y)
+                edgeCtx.lineTo(
+                  x - arrowSize * Math.cos(angle - Math.PI / 8),
+                  y - arrowSize * Math.sin(angle - Math.PI / 8)
+                )
+                edgeCtx.lineTo(
+                  x - arrowSize * Math.cos(angle + Math.PI / 8),
+                  y - arrowSize * Math.sin(angle + Math.PI / 8)
+                )
+                edgeCtx.closePath()
+                edgeCtx.fill()
+              } else if (arrowType === 'circle') {
+                const circleRadius = 4
+                edgeCtx.beginPath()
+                edgeCtx.arc(x, y, circleRadius, 0, Math.PI * 2)
+                edgeCtx.fill()
+              }
+            }
+
+            // Draw arrows based on arrow position
+            if (arrowType !== 'none' && arrowPosition !== 'none') {
+              const angle = Math.atan2(targetPos.y - sourcePos.y, targetPos.x - sourcePos.x)
+
+              // Draw arrow at end (target)
+              if (arrowPosition === 'end' || arrowPosition === 'both') {
+                const endX = targetPos.x - nodeRadius * Math.cos(angle)
+                const endY = targetPos.y - nodeRadius * Math.sin(angle)
+                drawArrow(endX, endY, angle)
+              }
+
+              // Draw arrow at start (source)
+              if (arrowPosition === 'start' || arrowPosition === 'both') {
+                const startX = sourcePos.x + nodeRadius * Math.cos(angle)
+                const startY = sourcePos.y + nodeRadius * Math.sin(angle)
+                drawArrow(startX, startY, angle + Math.PI) // Reverse direction
+              }
+            }
+
+            // Draw label if present
+            if (edgeLabel) {
+              const midX = (sourcePos.x + targetPos.x) / 2
+              const midY = (sourcePos.y + targetPos.y) / 2
+
+              edgeCtx.fillStyle = '#e2e8f0'
+              edgeCtx.font = '11px sans-serif'
+              edgeCtx.textAlign = 'center'
+              edgeCtx.textBaseline = 'middle'
+              edgeCtx.fillText(edgeLabel, midX, midY - 10)
+            }
+
+            // Reset global alpha
+            edgeCtx.globalAlpha = 1
+          }
+        })
+
+        // Restore context
+        edgeCtx.restore()
+
+        // Mark edge layer as clean
+        dirtyLayersRef.current.edges = false
+      }
+
+      // Layer 2: Nodes (meta-nodes and regular nodes)
+      const renderNodeLayer = () => {
+        if (!dirtyLayersRef.current.nodes) return
+
+        // Clear node canvas with transparency
+        nodeCtx.clearRect(0, 0, nodeCanvas.width, nodeCanvas.height)
+
+        // Save context and apply viewport transform
+        nodeCtx.save()
+        if (viewportRef.current) {
+          viewportRef.current.applyToContext(nodeCtx)
+        }
+
+        // PERFORMANCE: Get visible viewport bounds for culling
+        const viewportBounds = viewportRef.current?.getVisibleBounds()
+
+        // Draw meta-nodes
+        visibleMetaNodes.forEach((metaNode) => {
+          const pos = metaNodePositions.get(metaNode.id)
+          if (!pos) return
+
+          // PERFORMANCE: Viewport culling for meta-nodes
+          // Meta-nodes can be large, use generous margin
+          const metaNodeMargin = 500
+          if (viewportBounds) {
+            if (pos.x + metaNodeMargin < viewportBounds.left || pos.x - metaNodeMargin > viewportBounds.right ||
+                pos.y + metaNodeMargin < viewportBounds.top || pos.y - metaNodeMargin > viewportBounds.bottom) {
+              return // Skip this meta-node - it's outside viewport
+            }
+          }
+
+          if (!metaNode.collapsed) {
+            // Expanded meta-nodes no longer show a badge - they are invisible
+            // This forces all groupings to be shown as collapsed containers with grid layout
+            return // Skip rendering - nodes are shown ungrouped
+          }
+
+          // Draw collapsed meta-node - showing contained nodes with full styling
+
+          // Get contained nodes (filter by search if active)
+          let containedNodes = nodes.filter((n) => metaNode.childNodeIds.includes(n.id))
+          if (filteredNodeIds && filteredNodeIds.size > 0) {
+            containedNodes = containedNodes.filter((n) => filteredNodeIds.has(n.id))
+          }
+
+          // Calculate layout for contained nodes (grid layout)
+          // Use wider rectangles instead of squares for better visual organization
+          const nodeCount = containedNodes.length
+          const cols = Math.min(6, Math.ceil(Math.sqrt(nodeCount * 1.5))) // Wider rectangles
+          const rows = Math.ceil(nodeCount / cols)
+
+          // Use base card dimensions (will be adjusted per node based on their templates)
+          const baseCardWidth = 120
+          const baseCardHeight = 60
+          const spacing = 15
+          const padding = 25
+          const headerHeight = 0 // No header - removed blue label
+
+          // For container sizing, use maximum size multiplier among contained nodes
+          let maxSizeMultiplier = 1
+          containedNodes.forEach((node) => {
+            // PHASE 2 OPTIMIZATION: Use cached template evaluation results
+            const cachedTemplate = evaluatedNodeTemplates.get(node.id)
+            const templateId = cachedTemplate?.cardTemplateId || node.cardTemplateId
+            const cardTemplate = templateId ? getCardTemplateById(templateId) : undefined
+            const sizeMultiplier = cardTemplate?.size || 1
+            maxSizeMultiplier = Math.max(maxSizeMultiplier, sizeMultiplier)
+          })
+
+          const cardWidth = baseCardWidth * maxSizeMultiplier
+          const cardHeight = baseCardHeight * maxSizeMultiplier
+
+          const containerWidth = Math.max(200, cols * (cardWidth + spacing) - spacing + padding * 2)
+          const containerHeight = rows * (cardHeight + spacing) - spacing + padding * 2 + headerHeight
+
+          const containerX = pos.x - containerWidth / 2
+          const containerY = pos.y - containerHeight / 2
+          const radius = 12
+
+          // Draw container background
+          nodeCtx.fillStyle = '#0f172a'
+          nodeCtx.strokeStyle = '#3b82f6'
+          nodeCtx.lineWidth = 4
+
+          nodeCtx.beginPath()
+          nodeCtx.moveTo(containerX + radius, containerY)
+          nodeCtx.lineTo(containerX + containerWidth - radius, containerY)
+          nodeCtx.quadraticCurveTo(containerX + containerWidth, containerY, containerX + containerWidth, containerY + radius)
+          nodeCtx.lineTo(containerX + containerWidth, containerY + containerHeight - radius)
+          nodeCtx.quadraticCurveTo(containerX + containerWidth, containerY + containerHeight, containerX + containerWidth - radius, containerY + containerHeight)
+          nodeCtx.lineTo(containerX + radius, containerY + containerHeight)
+          nodeCtx.quadraticCurveTo(containerX, containerY + containerHeight, containerX, containerY + containerHeight - radius)
+          nodeCtx.lineTo(containerX, containerY + radius)
+          nodeCtx.quadraticCurveTo(containerX, containerY, containerX + radius, containerY)
+          nodeCtx.closePath()
+          nodeCtx.fill()
+          nodeCtx.stroke()
+
+          // Header removed - no blue label displayed
+
+          // Draw each contained node with full card styling
+          const startX = containerX + padding
+          const startY = containerY + headerHeight + padding
+
+          containedNodes.forEach((node, idx) => {
+            const row = Math.floor(idx / cols)
+            const col = idx % cols
+            const nodeX = startX + col * (cardWidth + spacing) + cardWidth / 2
+            const nodeY = startY + row * (cardHeight + spacing) + cardHeight / 2
+
+            // PHASE 2 OPTIMIZATION: Use cached template evaluation results
+            const cachedTemplate = evaluatedNodeTemplates.get(node.id)
+            const templateId = cachedTemplate?.cardTemplateId || node.cardTemplateId
+            const cardTemplate = templateId ? getCardTemplateById(templateId) : undefined
+
+            // Apply size multiplier for this specific node
+            const nodeSizeMultiplier = cardTemplate?.size || 1
+            const nodeCardWidth = baseCardWidth * nodeSizeMultiplier
+            const nodeCardHeight = baseCardHeight * nodeSizeMultiplier
+
+            // Draw node card (same as regular nodes but without selection highlight)
+            const x = nodeX - nodeCardWidth / 2
+            const y = nodeY - nodeCardHeight / 2
+
+            // Get template colors or defaults
+            const bgColor = cardTemplate?.backgroundColor || (node.isStub ? '#1e293b' : '#0f172a')
+            const borderColor = cardTemplate?.borderColor || (node.isStub ? '#475569' : '#0891b2')
+            const borderWidth = cardTemplate?.borderWidth || 2
+            const shape = cardTemplate?.shape || 'rect'
+
+            nodeCtx.fillStyle = bgColor
+            nodeCtx.strokeStyle = borderColor
+            nodeCtx.lineWidth = borderWidth
+
+            // Draw shape based on template
+            nodeCtx.beginPath()
+
+            switch (shape) {
+              case 'circle':
+                const circleRadius = Math.min(nodeCardWidth, nodeCardHeight) / 2
+                nodeCtx.arc(nodeX, nodeY, circleRadius, 0, Math.PI * 2)
+                break
+
+              case 'ellipse':
+                nodeCtx.ellipse(nodeX, nodeY, nodeCardWidth / 2, nodeCardHeight / 2, 0, 0, Math.PI * 2)
+                break
+
+              case 'diamond':
+                nodeCtx.moveTo(nodeX, y)
+                nodeCtx.lineTo(x + nodeCardWidth, nodeY)
+                nodeCtx.lineTo(nodeX, y + nodeCardHeight)
+                nodeCtx.lineTo(x, nodeY)
+                nodeCtx.closePath()
+                break
+
+              case 'triangle':
+                nodeCtx.moveTo(nodeX, y)
+                nodeCtx.lineTo(x + nodeCardWidth, y + nodeCardHeight)
+                nodeCtx.lineTo(x, y + nodeCardHeight)
+                nodeCtx.closePath()
+                break
+
+              case 'star':
+                const outerRadius = Math.min(nodeCardWidth, nodeCardHeight) / 2
+                const innerRadius = outerRadius * 0.4
+                for (let i = 0; i < 5; i++) {
+                  const outerAngle = (i * 4 * Math.PI) / 5 - Math.PI / 2
+                  const innerAngle = ((i * 4 + 2) * Math.PI) / 5 - Math.PI / 2
+                  if (i === 0) {
+                    nodeCtx.moveTo(nodeX + outerRadius * Math.cos(outerAngle), nodeY + outerRadius * Math.sin(outerAngle))
+                  } else {
+                    nodeCtx.lineTo(nodeX + outerRadius * Math.cos(outerAngle), nodeY + outerRadius * Math.sin(outerAngle))
+                  }
+                  nodeCtx.lineTo(nodeX + innerRadius * Math.cos(innerAngle), nodeY + innerRadius * Math.sin(innerAngle))
+                }
+                nodeCtx.closePath()
+                break
+
+              case 'rect':
+              default:
+                const cardRadius = 8
+                nodeCtx.moveTo(x + cardRadius, y)
+                nodeCtx.lineTo(x + nodeCardWidth - cardRadius, y)
+                nodeCtx.quadraticCurveTo(x + nodeCardWidth, y, x + nodeCardWidth, y + cardRadius)
+                nodeCtx.lineTo(x + nodeCardWidth, y + nodeCardHeight - cardRadius)
+                nodeCtx.quadraticCurveTo(x + nodeCardWidth, y + nodeCardHeight, x + nodeCardWidth - cardRadius, y + nodeCardHeight)
+                nodeCtx.lineTo(x + cardRadius, y + nodeCardHeight)
+                nodeCtx.quadraticCurveTo(x, y + nodeCardHeight, x, y + nodeCardHeight - cardRadius)
+                nodeCtx.lineTo(x, y + cardRadius)
+                nodeCtx.quadraticCurveTo(x, y, x + cardRadius, y)
+                nodeCtx.closePath()
+                break
+            }
+
+            nodeCtx.fill()
+            nodeCtx.stroke()
+
+            // Draw icon if template has one
+            if (cardTemplate?.icon) {
+              const iconSize = 16
+              const iconX = x + 10
+              const iconY = y + 10
+
+              nodeCtx.font = `${iconSize}px sans-serif`
+              nodeCtx.textAlign = 'left'
+              nodeCtx.textBaseline = 'top'
+              nodeCtx.fillText(cardTemplate.icon, iconX, iconY)
+            }
+
+            // Draw label
+            nodeCtx.fillStyle = '#fff'
+            nodeCtx.font = 'bold 11px sans-serif'
+            nodeCtx.textAlign = 'center'
+            nodeCtx.textBaseline = 'middle'
+            nodeCtx.fillText(node.label, nodeX, y + nodeCardHeight - 15)
+          })
+        })
+
+        // Draw nodes as cards (only visible nodes)
+        visibleNodes.forEach((node) => {
+          const pos = nodePositions.get(node.id)
+          if (!pos) {
+            // Debug: log nodes without positions
+            console.warn(`Node ${node.id} is visible but has no position`)
+            return
+          }
+
+          // PERFORMANCE: Viewport culling - skip nodes outside visible area
+          // Add margin to account for node size (max 240px for 2x size multiplier)
+          const margin = 240
+          if (viewportBounds) {
+            if (pos.x + margin < viewportBounds.left || pos.x - margin > viewportBounds.right ||
+                pos.y + margin < viewportBounds.top || pos.y - margin > viewportBounds.bottom) {
+              return // Skip this node - it's outside viewport
+            }
+          }
+
+          const isSelected = node.id === selectedNodeId
 
           // PHASE 2 OPTIMIZATION: Use cached template evaluation results
           const cachedTemplate = evaluatedNodeTemplates.get(node.id)
           const templateId = cachedTemplate?.cardTemplateId || node.cardTemplateId
           const cardTemplate = templateId ? getCardTemplateById(templateId) : undefined
 
-          // Apply size multiplier for this specific node
-          const nodeSizeMultiplier = cardTemplate?.size || 1
-          const nodeCardWidth = baseCardWidth * nodeSizeMultiplier
-          const nodeCardHeight = baseCardHeight * nodeSizeMultiplier
+          // Apply size multiplier from template
+          const sizeMultiplier = cardTemplate?.size || 1
+          let cardWidth = 120 * sizeMultiplier
+          let cardHeight = 60 * sizeMultiplier
 
-          // Draw node card (same as regular nodes but without selection highlight)
-          const x = nodeX - nodeCardWidth / 2
-          const y = nodeY - nodeCardHeight / 2
+          // Auto-fit: measure all visible content and adjust card size if needed
+          if (cardTemplate?.autoFit) {
+            let maxWidth = 0
+            let totalHeight = 0
 
-          // Get template colors or defaults
+            // PHASE 2 OPTIMIZATION: Use cached text measurements instead of nodeCtx.measureText()
+            // Measure label
+            const labelFont = '12px sans-serif'
+            const labelKey = `${node.label}-${labelFont}`
+            const labelMeasurement = textMeasurements.get(labelKey)
+            if (labelMeasurement) {
+              maxWidth = Math.max(maxWidth, labelMeasurement.width)
+              totalHeight += labelMeasurement.height
+            }
+
+            // Measure visible attributes
+            if (cardTemplate?.attributeDisplays && cardTemplate.attributeDisplays.length > 0) {
+              const visibleAttrs = cardTemplate.attributeDisplays
+                .filter((attrDisplay) => attrDisplay.visible)
+                .sort((a, b) => a.order - b.order)
+
+              visibleAttrs.forEach((attrDisplay) => {
+                let attrValue = ''
+                if (attrDisplay.attributeName === '__id__') {
+                  attrValue = node.id
+                } else if (node.attributes[attrDisplay.attributeName]) {
+                  const value = node.attributes[attrDisplay.attributeName]
+                  attrValue = Array.isArray(value) ? value.join(', ') : value
+                }
+
+                if (attrValue) {
+                  const fontSize = attrDisplay.fontSize || 10
+                  const font = `${fontSize}px sans-serif`
+                  const labelText = attrDisplay.displayLabel || attrDisplay.attributeName
+                  const prefix = attrDisplay.prefix || ''
+                  const suffix = attrDisplay.suffix || ''
+                  const fullText = `${prefix}${labelText}: ${attrValue}${suffix}`
+                  const textKey = `${fullText}-${font}`
+
+                  const measurement = textMeasurements.get(textKey)
+                  if (measurement) {
+                    maxWidth = Math.max(maxWidth, measurement.width)
+                    totalHeight += measurement.height
+                  }
+                }
+              })
+            }
+
+            // Add padding and apply
+            const requiredWidth = maxWidth + 40
+            const requiredHeight = totalHeight + 50 // Extra padding for icon
+            cardWidth = Math.max(cardWidth, requiredWidth)
+            cardHeight = Math.max(cardHeight, requiredHeight)
+          }
+
+          // Debug: log if template is missing when expected
+          if (templateId && !cardTemplate) {
+            console.warn(`Node ${node.id} has templateId ${templateId} but template not found`)
+          }
+
+          // Draw card background using template colors or defaults
           const bgColor = cardTemplate?.backgroundColor || (node.isStub ? '#1e293b' : '#0f172a')
-          const borderColor = cardTemplate?.borderColor || (node.isStub ? '#475569' : '#0891b2')
+          let borderColor = cardTemplate?.borderColor || (node.isStub ? '#475569' : '#0891b2')
           const borderWidth = cardTemplate?.borderWidth || 2
           const shape = cardTemplate?.shape || 'rect'
+          const effects = cardTemplate?.effects
 
-          ctx.fillStyle = bgColor
-          ctx.strokeStyle = borderColor
-          ctx.lineWidth = borderWidth
+          // Apply RGB cycling to border if enabled
+          if (effects?.rgbCycle?.enabled && (effects.rgbCycle.target === 'border' || effects.rgbCycle.target === 'both')) {
+            borderColor = getRGBColor(animationTime, effects.rgbCycle.speed)
+          }
 
-          // Draw shape based on template
-          ctx.beginPath()
+          // Apply shadow effect if enabled
+          if (effects?.shadow?.enabled) {
+            nodeCtx.shadowColor = effects.shadow.color
+            nodeCtx.shadowBlur = effects.shadow.blur
+            nodeCtx.shadowOffsetX = effects.shadow.offsetX
+            nodeCtx.shadowOffsetY = effects.shadow.offsetY
+          }
 
-          switch (shape) {
+          // Apply pulse effect if enabled (scale based on time)
+          let pulseScale = 1
+          if (effects?.pulse?.enabled) {
+            const pulseSpeed = effects.pulse.speed
+            pulseScale = 1 + Math.sin(animationTime * pulseSpeed * 2) * 0.1
+          }
+
+          // Apply glow effect if enabled
+          if (effects?.glow?.enabled) {
+            let glowColor = effects.glow.color
+            if (effects.rgbCycle?.enabled && (effects.rgbCycle.target === 'glow' || effects.rgbCycle.target === 'both')) {
+              glowColor = getRGBColor(animationTime, effects.rgbCycle.speed)
+            }
+            nodeCtx.shadowColor = glowColor
+            nodeCtx.shadowBlur = effects.glow.blur * effects.glow.intensity
+            nodeCtx.shadowOffsetX = 0
+            nodeCtx.shadowOffsetY = 0
+          }
+
+          // Check if shape should be transparent
+          const transparentShape = cardTemplate?.transparentShape || false
+
+          nodeCtx.fillStyle = bgColor
+          nodeCtx.strokeStyle = isSelected ? '#22d3ee' : borderColor
+          nodeCtx.lineWidth = isSelected ? 3 : borderWidth
+
+          // Draw shape based on template (skip if transparent)
+          const adjustedWidth = cardWidth * pulseScale
+          const adjustedHeight = cardHeight * pulseScale
+          const x = pos.x - adjustedWidth / 2
+          const y = pos.y - adjustedHeight / 2
+
+          if (!transparentShape) {
+            nodeCtx.beginPath()
+
+            switch (shape) {
             case 'circle':
-              const circleRadius = Math.min(nodeCardWidth, nodeCardHeight) / 2
-              ctx.arc(nodeX, nodeY, circleRadius, 0, Math.PI * 2)
+              // Draw as circle using the average of width/height as diameter
+              const circleRadius = Math.min(adjustedWidth, adjustedHeight) / 2
+              nodeCtx.arc(pos.x, pos.y, circleRadius * pulseScale, 0, Math.PI * 2)
               break
 
             case 'ellipse':
-              ctx.ellipse(nodeX, nodeY, nodeCardWidth / 2, nodeCardHeight / 2, 0, 0, Math.PI * 2)
+              // Draw as ellipse
+              nodeCtx.ellipse(pos.x, pos.y, adjustedWidth / 2, adjustedHeight / 2, 0, 0, Math.PI * 2)
               break
 
             case 'diamond':
-              ctx.moveTo(nodeX, y)
-              ctx.lineTo(x + nodeCardWidth, nodeY)
-              ctx.lineTo(nodeX, y + nodeCardHeight)
-              ctx.lineTo(x, nodeY)
-              ctx.closePath()
+              // Draw as diamond (rotated square)
+              nodeCtx.moveTo(pos.x, y) // Top point
+              nodeCtx.lineTo(x + adjustedWidth, pos.y) // Right point
+              nodeCtx.lineTo(pos.x, y + adjustedHeight) // Bottom point
+              nodeCtx.lineTo(x, pos.y) // Left point
+              nodeCtx.closePath()
               break
 
             case 'triangle':
-              ctx.moveTo(nodeX, y)
-              ctx.lineTo(x + nodeCardWidth, y + nodeCardHeight)
-              ctx.lineTo(x, y + nodeCardHeight)
-              ctx.closePath()
+              // Draw as triangle
+              nodeCtx.moveTo(pos.x, y) // Top point
+              nodeCtx.lineTo(x + adjustedWidth, y + adjustedHeight) // Bottom right
+              nodeCtx.lineTo(x, y + adjustedHeight) // Bottom left
+              nodeCtx.closePath()
               break
 
             case 'star':
-              const outerRadius = Math.min(nodeCardWidth, nodeCardHeight) / 2
+              // Draw as 5-point star
+              const outerRadius = Math.min(adjustedWidth, adjustedHeight) / 2
               const innerRadius = outerRadius * 0.4
               for (let i = 0; i < 5; i++) {
                 const outerAngle = (i * 4 * Math.PI) / 5 - Math.PI / 2
                 const innerAngle = ((i * 4 + 2) * Math.PI) / 5 - Math.PI / 2
                 if (i === 0) {
-                  ctx.moveTo(nodeX + outerRadius * Math.cos(outerAngle), nodeY + outerRadius * Math.sin(outerAngle))
+                  nodeCtx.moveTo(pos.x + outerRadius * Math.cos(outerAngle), pos.y + outerRadius * Math.sin(outerAngle))
                 } else {
-                  ctx.lineTo(nodeX + outerRadius * Math.cos(outerAngle), nodeY + outerRadius * Math.sin(outerAngle))
+                  nodeCtx.lineTo(pos.x + outerRadius * Math.cos(outerAngle), pos.y + outerRadius * Math.sin(outerAngle))
                 }
-                ctx.lineTo(nodeX + innerRadius * Math.cos(innerAngle), nodeY + innerRadius * Math.sin(innerAngle))
+                nodeCtx.lineTo(pos.x + innerRadius * Math.cos(innerAngle), pos.y + innerRadius * Math.sin(innerAngle))
               }
-              ctx.closePath()
+              nodeCtx.closePath()
               break
 
             case 'rect':
             default:
-              const cardRadius = 8
-              ctx.moveTo(x + cardRadius, y)
-              ctx.lineTo(x + nodeCardWidth - cardRadius, y)
-              ctx.quadraticCurveTo(x + nodeCardWidth, y, x + nodeCardWidth, y + cardRadius)
-              ctx.lineTo(x + nodeCardWidth, y + nodeCardHeight - cardRadius)
-              ctx.quadraticCurveTo(x + nodeCardWidth, y + nodeCardHeight, x + nodeCardWidth - cardRadius, y + nodeCardHeight)
-              ctx.lineTo(x + cardRadius, y + nodeCardHeight)
-              ctx.quadraticCurveTo(x, y + nodeCardHeight, x, y + nodeCardHeight - cardRadius)
-              ctx.lineTo(x, y + cardRadius)
-              ctx.quadraticCurveTo(x, y, x + cardRadius, y)
-              ctx.closePath()
+              // Draw as rounded rectangle (default)
+              const radius = 8
+              nodeCtx.moveTo(x + radius, y)
+              nodeCtx.lineTo(x + adjustedWidth - radius, y)
+              nodeCtx.quadraticCurveTo(x + adjustedWidth, y, x + adjustedWidth, y + radius)
+              nodeCtx.lineTo(x + adjustedWidth, y + adjustedHeight - radius)
+              nodeCtx.quadraticCurveTo(x + adjustedWidth, y + adjustedHeight, x + adjustedWidth - radius, y + adjustedHeight)
+              nodeCtx.lineTo(x + radius, y + adjustedHeight)
+              nodeCtx.quadraticCurveTo(x, y + adjustedHeight, x, y + adjustedHeight - radius)
+              nodeCtx.lineTo(x, y + radius)
+              nodeCtx.quadraticCurveTo(x, y, x + radius, y)
+              nodeCtx.closePath()
               break
+            }
+
+            nodeCtx.fill()
+            nodeCtx.stroke()
           }
 
-          ctx.fill()
-          ctx.stroke()
+          // Reset shadow after drawing shape
+          nodeCtx.shadowColor = 'transparent'
+          nodeCtx.shadowBlur = 0
+          nodeCtx.shadowOffsetX = 0
+          nodeCtx.shadowOffsetY = 0
 
-          // Draw icon if template has one
-          if (cardTemplate?.icon) {
-            const iconSize = 16
-            const iconX = x + 10
-            const iconY = y + 10
+          // Draw icon circle or template icon (if showIcon is not false)
+          const showIcon = cardTemplate?.showIcon !== false
+          if (showIcon) {
+            const iconRadius = 16
+            const iconX = pos.x
+            const iconY = pos.y - 15
 
-            ctx.font = `${iconSize}px sans-serif`
-            ctx.textAlign = 'left'
-            ctx.textBaseline = 'top'
-            ctx.fillText(cardTemplate.icon, iconX, iconY)
+            if (cardTemplate?.icon) {
+              // Use template icon with custom size
+              const iconSize = cardTemplate.iconSize ? cardTemplate.iconSize * 16 : 16
+              nodeCtx.font = `${iconSize}px sans-serif`
+              nodeCtx.fillStyle = cardTemplate.iconColor || '#fff'
+              nodeCtx.textAlign = 'center'
+              nodeCtx.textBaseline = 'middle'
+              nodeCtx.fillText(cardTemplate.icon, iconX, iconY)
+            } else {
+              // Default icon circle with first letter
+              nodeCtx.fillStyle = node.isStub ? '#64748b' : '#06b6d4'
+              nodeCtx.beginPath()
+              nodeCtx.arc(iconX, iconY, iconRadius, 0, Math.PI * 2)
+              nodeCtx.fill()
+
+              // Draw icon (simple letter)
+              nodeCtx.fillStyle = '#fff'
+              nodeCtx.font = 'bold 14px sans-serif'
+              nodeCtx.textAlign = 'center'
+              nodeCtx.textBaseline = 'middle'
+              nodeCtx.fillText(node.label.charAt(0).toUpperCase(), iconX, iconY)
+            }
           }
 
           // Draw label
-          ctx.fillStyle = '#fff'
-          ctx.font = 'bold 11px sans-serif'
-          ctx.textAlign = 'center'
-          ctx.textBaseline = 'middle'
-          ctx.fillText(node.label, nodeX, y + nodeCardHeight - 15)
-        })
-      })
+          nodeCtx.fillStyle = '#e2e8f0'
+          nodeCtx.font = '12px sans-serif'
+          nodeCtx.textAlign = 'center'
+          nodeCtx.textBaseline = 'top'
+          nodeCtx.fillText(node.label, pos.x, pos.y + 8)
 
-      // Draw nodes as cards (only visible nodes)
-      visibleNodes.forEach((node) => {
-        const pos = nodePositions.get(node.id)
-        if (!pos) {
-          // Debug: log nodes without positions
-          console.warn(`Node ${node.id} is visible but has no position`)
-          return
-        }
-
-        // PERFORMANCE: Viewport culling - skip nodes outside visible area
-        // Add margin to account for node size (max 240px for 2x size multiplier)
-        const margin = 240
-        if (viewportBounds) {
-          if (pos.x + margin < viewportBounds.left || pos.x - margin > viewportBounds.right ||
-              pos.y + margin < viewportBounds.top || pos.y - margin > viewportBounds.bottom) {
-            return // Skip this node - it's outside viewport
-          }
-        }
-
-        const isSelected = node.id === selectedNodeId
-
-        // PHASE 2 OPTIMIZATION: Use cached template evaluation results
-        const cachedTemplate = evaluatedNodeTemplates.get(node.id)
-        const templateId = cachedTemplate?.cardTemplateId || node.cardTemplateId
-        const cardTemplate = templateId ? getCardTemplateById(templateId) : undefined
-
-        // Apply size multiplier from template
-        const sizeMultiplier = cardTemplate?.size || 1
-        let cardWidth = 120 * sizeMultiplier
-        let cardHeight = 60 * sizeMultiplier
-
-        // Auto-fit: measure all visible content and adjust card size if needed
-        if (cardTemplate?.autoFit) {
-          let maxWidth = 0
-          let totalHeight = 0
-
-          // PHASE 2 OPTIMIZATION: Use cached text measurements instead of ctx.measureText()
-          // Measure label
-          const labelFont = '12px sans-serif'
-          const labelKey = `${node.label}-${labelFont}`
-          const labelMeasurement = textMeasurements.get(labelKey)
-          if (labelMeasurement) {
-            maxWidth = Math.max(maxWidth, labelMeasurement.width)
-            totalHeight += labelMeasurement.height
-          }
-
-          // Measure visible attributes
+          // Render attributes from card template (already evaluated above)
           if (cardTemplate?.attributeDisplays && cardTemplate.attributeDisplays.length > 0) {
+            // Render attributes based on template configuration
             const visibleAttrs = cardTemplate.attributeDisplays
               .filter((attrDisplay) => attrDisplay.visible)
               .sort((a, b) => a.order - b.order)
 
-            visibleAttrs.forEach((attrDisplay) => {
+            let yOffset = pos.y + 24
+            const maxAttrsToShow = 3 // Limit to prevent overflow
+
+            visibleAttrs.slice(0, maxAttrsToShow).forEach((attrDisplay) => {
+              // Get attribute value
               let attrValue = ''
               if (attrDisplay.attributeName === '__id__') {
                 attrValue = node.id
@@ -2540,266 +2870,89 @@ export function G6Graph() {
               }
 
               if (attrValue) {
+                // Apply styling from attribute display configuration
                 const fontSize = attrDisplay.fontSize || 10
-                const font = `${fontSize}px sans-serif`
-                const labelText = attrDisplay.displayLabel || attrDisplay.attributeName
+                const color = attrDisplay.color || '#94a3b8'
+                const displayLabel = attrDisplay.displayLabel || attrDisplay.attributeName
                 const prefix = attrDisplay.prefix || ''
                 const suffix = attrDisplay.suffix || ''
-                const fullText = `${prefix}${labelText}: ${attrValue}${suffix}`
-                const textKey = `${fullText}-${font}`
 
-                const measurement = textMeasurements.get(textKey)
-                if (measurement) {
-                  maxWidth = Math.max(maxWidth, measurement.width)
-                  totalHeight += measurement.height
-                }
+                // Build display text
+                const displayText = `${prefix}${displayLabel}: ${attrValue}${suffix}`
+
+                nodeCtx.fillStyle = color
+                nodeCtx.font = `${fontSize}px sans-serif`
+                nodeCtx.textAlign = 'center'
+                nodeCtx.textBaseline = 'top'
+                nodeCtx.fillText(displayText, pos.x, yOffset)
+
+                yOffset += fontSize + 4
               }
             })
-          }
 
-          // Add padding and apply
-          const requiredWidth = maxWidth + 40
-          const requiredHeight = totalHeight + 50 // Extra padding for icon
-          cardWidth = Math.max(cardWidth, requiredWidth)
-          cardHeight = Math.max(cardHeight, requiredHeight)
-        }
-
-        // Debug: log if template is missing when expected
-        if (templateId && !cardTemplate) {
-          console.warn(`Node ${node.id} has templateId ${templateId} but template not found`)
-        }
-
-        // Draw card background using template colors or defaults
-        const bgColor = cardTemplate?.backgroundColor || (node.isStub ? '#1e293b' : '#0f172a')
-        let borderColor = cardTemplate?.borderColor || (node.isStub ? '#475569' : '#0891b2')
-        const borderWidth = cardTemplate?.borderWidth || 2
-        const shape = cardTemplate?.shape || 'rect'
-        const effects = cardTemplate?.effects
-
-        // Apply RGB cycling to border if enabled
-        if (effects?.rgbCycle?.enabled && (effects.rgbCycle.target === 'border' || effects.rgbCycle.target === 'both')) {
-          borderColor = getRGBColor(animationTime, effects.rgbCycle.speed)
-        }
-
-        // Apply shadow effect if enabled
-        if (effects?.shadow?.enabled) {
-          ctx.shadowColor = effects.shadow.color
-          ctx.shadowBlur = effects.shadow.blur
-          ctx.shadowOffsetX = effects.shadow.offsetX
-          ctx.shadowOffsetY = effects.shadow.offsetY
-        }
-
-        // Apply pulse effect if enabled (scale based on time)
-        let pulseScale = 1
-        if (effects?.pulse?.enabled) {
-          const pulseSpeed = effects.pulse.speed
-          pulseScale = 1 + Math.sin(animationTime * pulseSpeed * 2) * 0.1
-        }
-
-        // Apply glow effect if enabled
-        if (effects?.glow?.enabled) {
-          let glowColor = effects.glow.color
-          if (effects.rgbCycle?.enabled && (effects.rgbCycle.target === 'glow' || effects.rgbCycle.target === 'both')) {
-            glowColor = getRGBColor(animationTime, effects.rgbCycle.speed)
-          }
-          ctx.shadowColor = glowColor
-          ctx.shadowBlur = effects.glow.blur * effects.glow.intensity
-          ctx.shadowOffsetX = 0
-          ctx.shadowOffsetY = 0
-        }
-
-        // Check if shape should be transparent
-        const transparentShape = cardTemplate?.transparentShape || false
-
-        ctx.fillStyle = bgColor
-        ctx.strokeStyle = isSelected ? '#22d3ee' : borderColor
-        ctx.lineWidth = isSelected ? 3 : borderWidth
-
-        // Draw shape based on template (skip if transparent)
-        const adjustedWidth = cardWidth * pulseScale
-        const adjustedHeight = cardHeight * pulseScale
-        const x = pos.x - adjustedWidth / 2
-        const y = pos.y - adjustedHeight / 2
-
-        if (!transparentShape) {
-          ctx.beginPath()
-
-          switch (shape) {
-          case 'circle':
-            // Draw as circle using the average of width/height as diameter
-            const circleRadius = Math.min(adjustedWidth, adjustedHeight) / 2
-            ctx.arc(pos.x, pos.y, circleRadius * pulseScale, 0, Math.PI * 2)
-            break
-
-          case 'ellipse':
-            // Draw as ellipse
-            ctx.ellipse(pos.x, pos.y, adjustedWidth / 2, adjustedHeight / 2, 0, 0, Math.PI * 2)
-            break
-
-          case 'diamond':
-            // Draw as diamond (rotated square)
-            ctx.moveTo(pos.x, y) // Top point
-            ctx.lineTo(x + adjustedWidth, pos.y) // Right point
-            ctx.lineTo(pos.x, y + adjustedHeight) // Bottom point
-            ctx.lineTo(x, pos.y) // Left point
-            ctx.closePath()
-            break
-
-          case 'triangle':
-            // Draw as triangle
-            ctx.moveTo(pos.x, y) // Top point
-            ctx.lineTo(x + adjustedWidth, y + adjustedHeight) // Bottom right
-            ctx.lineTo(x, y + adjustedHeight) // Bottom left
-            ctx.closePath()
-            break
-
-          case 'star':
-            // Draw as 5-point star
-            const outerRadius = Math.min(adjustedWidth, adjustedHeight) / 2
-            const innerRadius = outerRadius * 0.4
-            for (let i = 0; i < 5; i++) {
-              const outerAngle = (i * 4 * Math.PI) / 5 - Math.PI / 2
-              const innerAngle = ((i * 4 + 2) * Math.PI) / 5 - Math.PI / 2
-              if (i === 0) {
-                ctx.moveTo(pos.x + outerRadius * Math.cos(outerAngle), pos.y + outerRadius * Math.sin(outerAngle))
-              } else {
-                ctx.lineTo(pos.x + outerRadius * Math.cos(outerAngle), pos.y + outerRadius * Math.sin(outerAngle))
-              }
-              ctx.lineTo(pos.x + innerRadius * Math.cos(innerAngle), pos.y + innerRadius * Math.sin(innerAngle))
+            // Show indicator if there are more attributes
+            if (visibleAttrs.length > maxAttrsToShow) {
+              nodeCtx.fillStyle = '#64748b'
+              nodeCtx.font = '9px sans-serif'
+              nodeCtx.fillText(`+${visibleAttrs.length - maxAttrsToShow} more`, pos.x, yOffset)
             }
-            ctx.closePath()
-            break
-
-          case 'rect':
-          default:
-            // Draw as rounded rectangle (default)
-            const radius = 8
-            ctx.moveTo(x + radius, y)
-            ctx.lineTo(x + adjustedWidth - radius, y)
-            ctx.quadraticCurveTo(x + adjustedWidth, y, x + adjustedWidth, y + radius)
-            ctx.lineTo(x + adjustedWidth, y + adjustedHeight - radius)
-            ctx.quadraticCurveTo(x + adjustedWidth, y + adjustedHeight, x + adjustedWidth - radius, y + adjustedHeight)
-            ctx.lineTo(x + radius, y + adjustedHeight)
-            ctx.quadraticCurveTo(x, y + adjustedHeight, x, y + adjustedHeight - radius)
-            ctx.lineTo(x, y + radius)
-            ctx.quadraticCurveTo(x, y, x + radius, y)
-            ctx.closePath()
-            break
           }
+        })
 
-          ctx.fill()
-          ctx.stroke()
+        // Restore context
+        nodeCtx.restore()
+
+        // Mark node layer as clean
+        dirtyLayersRef.current.nodes = false
+      }
+
+      // Layer 3: Overlay (selection highlights, hover effects - currently transparent)
+      const renderOverlayLayer = () => {
+        if (!dirtyLayersRef.current.overlay) return
+
+        // Clear overlay canvas with transparency
+        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height)
+
+        // Save context and apply viewport transform
+        overlayCtx.save()
+        if (viewportRef.current) {
+          viewportRef.current.applyToContext(overlayCtx)
         }
 
-        // Reset shadow after drawing shape
-        ctx.shadowColor = 'transparent'
-        ctx.shadowBlur = 0
-        ctx.shadowOffsetX = 0
-        ctx.shadowOffsetY = 0
+        // TODO: Add selection highlights, hover effects, etc. here in the future
 
-        // Draw icon circle or template icon (if showIcon is not false)
-        const showIcon = cardTemplate?.showIcon !== false
-        if (showIcon) {
-          const iconRadius = 16
-          const iconX = pos.x
-          const iconY = pos.y - 15
+        // Restore context
+        overlayCtx.restore()
 
-          if (cardTemplate?.icon) {
-            // Use template icon with custom size
-            const iconSize = cardTemplate.iconSize ? cardTemplate.iconSize * 16 : 16
-            ctx.font = `${iconSize}px sans-serif`
-            ctx.fillStyle = cardTemplate.iconColor || '#fff'
-            ctx.textAlign = 'center'
-            ctx.textBaseline = 'middle'
-            ctx.fillText(cardTemplate.icon, iconX, iconY)
-          } else {
-            // Default icon circle with first letter
-            ctx.fillStyle = node.isStub ? '#64748b' : '#06b6d4'
-            ctx.beginPath()
-            ctx.arc(iconX, iconY, iconRadius, 0, Math.PI * 2)
-            ctx.fill()
+        // Mark overlay layer as clean
+        dirtyLayersRef.current.overlay = false
+      }
 
-            // Draw icon (simple letter)
-            ctx.fillStyle = '#fff'
-            ctx.font = 'bold 14px sans-serif'
-            ctx.textAlign = 'center'
-            ctx.textBaseline = 'middle'
-            ctx.fillText(node.label.charAt(0).toUpperCase(), iconX, iconY)
-          }
-        }
+      // ===================================================================
+      // CALL ALL LAYER RENDERING FUNCTIONS
+      // ===================================================================
+      renderBackgroundLayer()
+      renderEdgeLayer()
+      renderNodeLayer()
+      renderOverlayLayer()
 
-        // Draw label
-        ctx.fillStyle = '#e2e8f0'
-        ctx.font = '12px sans-serif'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'top'
-        ctx.fillText(node.label, pos.x, pos.y + 8)
-
-        // Render attributes from card template (already evaluated above)
-        if (cardTemplate?.attributeDisplays && cardTemplate.attributeDisplays.length > 0) {
-          // Render attributes based on template configuration
-          const visibleAttrs = cardTemplate.attributeDisplays
-            .filter((attrDisplay) => attrDisplay.visible)
-            .sort((a, b) => a.order - b.order)
-
-          let yOffset = pos.y + 24
-          const maxAttrsToShow = 3 // Limit to prevent overflow
-
-          visibleAttrs.slice(0, maxAttrsToShow).forEach((attrDisplay) => {
-            // Get attribute value
-            let attrValue = ''
-            if (attrDisplay.attributeName === '__id__') {
-              attrValue = node.id
-            } else if (node.attributes[attrDisplay.attributeName]) {
-              const value = node.attributes[attrDisplay.attributeName]
-              attrValue = Array.isArray(value) ? value.join(', ') : value
-            }
-
-            if (attrValue) {
-              // Apply styling from attribute display configuration
-              const fontSize = attrDisplay.fontSize || 10
-              const color = attrDisplay.color || '#94a3b8'
-              const displayLabel = attrDisplay.displayLabel || attrDisplay.attributeName
-              const prefix = attrDisplay.prefix || ''
-              const suffix = attrDisplay.suffix || ''
-
-              // Build display text
-              const displayText = `${prefix}${displayLabel}: ${attrValue}${suffix}`
-
-              ctx.fillStyle = color
-              ctx.font = `${fontSize}px sans-serif`
-              ctx.textAlign = 'center'
-              ctx.textBaseline = 'top'
-              ctx.fillText(displayText, pos.x, yOffset)
-
-              yOffset += fontSize + 4
-            }
-          })
-
-          // Show indicator if there are more attributes
-          if (visibleAttrs.length > maxAttrsToShow) {
-            ctx.fillStyle = '#64748b'
-            ctx.font = '9px sans-serif'
-            ctx.fillText(`+${visibleAttrs.length - maxAttrsToShow} more`, pos.x, yOffset)
-          }
-        }
-      })
-
-      // Restore context
-      ctx.restore()
-
-      // PERFORMANCE: Motion detection - only render if something changed
-      // Check if any positions changed since last frame
+      // PERFORMANCE: Motion detection - mark layers dirty based on what changed
       let hasMotion = false
 
       // Check if physics is active
       if (physicsEnabled && iterationCount < maxIterations) {
         hasMotion = true
+        // Physics running: edges and nodes need updates
+        dirtyLayersRef.current.edges = true
+        dirtyLayersRef.current.nodes = true
       }
 
       // Check if dragging
       if (draggedNodeId) {
         hasMotion = true
+        // Dragging: edges and nodes need updates
+        dirtyLayersRef.current.edges = true
+        dirtyLayersRef.current.nodes = true
       }
 
       // Check if node positions changed
@@ -2808,6 +2961,9 @@ export function G6Graph() {
           const lastPos = lastPositionsRef.current.get(id)
           if (!lastPos || Math.abs(pos.x - lastPos.x) > 0.1 || Math.abs(pos.y - lastPos.y) > 0.1) {
             hasMotion = true
+            // Node positions changed: mark edges and nodes as dirty
+            dirtyLayersRef.current.edges = true
+            dirtyLayersRef.current.nodes = true
           }
         })
       }
@@ -2818,6 +2974,9 @@ export function G6Graph() {
           const lastPos = lastMetaPositionsRef.current.get(id)
           if (!lastPos || Math.abs(pos.x - lastPos.x) > 0.1 || Math.abs(pos.y - lastPos.y) > 0.1) {
             hasMotion = true
+            // Meta-node positions changed: mark edges and nodes as dirty
+            dirtyLayersRef.current.edges = true
+            dirtyLayersRef.current.nodes = true
           }
         })
       }
@@ -2849,9 +3008,32 @@ export function G6Graph() {
 
   return (
     <div className="relative w-full h-full">
+      {/* PERFORMANCE: Layered Canvas Architecture */}
+      {/* Layer 0: Background - swimlanes, static content (rarely changes) */}
       <canvas
-        ref={canvasRef}
-        className="w-full h-full"
+        ref={backgroundCanvasRef}
+        className="absolute top-0 left-0 w-full h-full"
+        style={{ width: '100%', height: '100%', pointerEvents: 'none' }}
+      />
+
+      {/* Layer 1: Edges - connections between nodes (changes when nodes move) */}
+      <canvas
+        ref={edgeCanvasRef}
+        className="absolute top-0 left-0 w-full h-full"
+        style={{ width: '100%', height: '100%', pointerEvents: 'none' }}
+      />
+
+      {/* Layer 2: Nodes - cards/nodes (changes frequently during physics) */}
+      <canvas
+        ref={nodeCanvasRef}
+        className="absolute top-0 left-0 w-full h-full"
+        style={{ width: '100%', height: '100%', pointerEvents: 'none' }}
+      />
+
+      {/* Layer 3: Overlay - interaction layer with mouse events */}
+      <canvas
+        ref={overlayCanvasRef}
+        className="absolute top-0 left-0 w-full h-full"
         style={{
           width: '100%',
           height: '100%',
