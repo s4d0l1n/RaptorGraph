@@ -51,7 +51,7 @@ export function G6Graph() {
   const { setSelectedNodeId, setSelectedMetaNodeId, selectedNodeId, selectedMetaNodeId, filteredNodeIds } = useUIStore()
   const { layoutConfig } = useProjectStore()
   const { getEdgeTemplateById, getDefaultEdgeTemplate, getCardTemplateById, cardTemplates, edgeTemplates } = useTemplateStore()
-  const { exportAsSVG, exportAsPNG, exportCanvasRegion, exportFullGraphAsPNG } = useGraphExport()
+  const { exportAsSVG } = useGraphExport()
   const { getEnabledRules, styleRules } = useRulesStore()
   const [nodePositions, setNodePositions] = useState<Map<string, NodePosition>>(new Map())
   const [metaNodePositions, setMetaNodePositions] = useState<Map<string, NodePosition>>(new Map())
@@ -446,6 +446,13 @@ export function G6Graph() {
         textColor: '#e2e8f0',
         shape: cardTemplate?.shape || 'rect',
         sizeMultiplier: cardTemplate?.size || 1,
+        icon: cardTemplate?.icon,
+        iconSize: cardTemplate?.iconSize,
+        iconColor: cardTemplate?.iconColor,
+        isStub: node.isStub,
+        label: node.label,
+        attributes: node.attributes,
+        attributeDisplays: cardTemplate?.attributeDisplays,
       })
     })
 
@@ -465,9 +472,7 @@ export function G6Graph() {
       })
     })
 
-    const { zoom, pan, rotation } = viewportRef.current.getTransform();
-
-    // Export as SVG with current view state
+    // Export as SVG
     exportAsSVG(
       nodes,
       edges,
@@ -476,84 +481,9 @@ export function G6Graph() {
       metaNodePositions,
       nodeStyles,
       edgeStyles,
-      canvasRef.current.width,
-      canvasRef.current.height,
-      zoom,
-      pan,
-      rotation,
       'raptorgraph-export'
     )
   }, [nodes, edges, metaNodes, nodePositions, metaNodePositions, getEnabledRules, getCardTemplateById, getEdgeTemplateById, getDefaultEdgeTemplate, exportAsSVG])
-
-  // Export handler for PNG - renders entire graph to a new canvas
-  const handleExportPNG = useCallback(() => {
-    // Build node styles map
-    const nodeStyles = new Map<string, any>()
-    const enabledRules = getEnabledRules()
-
-    nodes.forEach((node) => {
-      let cardTemplate = getCardTemplateById(node.templateId)
-
-      // Apply style rules if enabled
-      if (enabledRules.length > 0) {
-        const matchedRules = evaluateNodeRules(node, enabledRules)
-        if (matchedRules.length > 0) {
-          const ruleTemplate = matchedRules[0].applyTemplate
-          if (ruleTemplate) {
-            cardTemplate = ruleTemplate
-          }
-        }
-      }
-
-      nodeStyles.set(node.id, {
-        backgroundColor: cardTemplate?.backgroundColor || '#1e293b',
-        borderColor: cardTemplate?.borderColor || '#0891b2',
-        borderWidth: cardTemplate?.borderWidth || 2,
-        textColor: '#e2e8f0',
-        shape: cardTemplate?.shape || 'rect',
-        sizeMultiplier: cardTemplate?.size || 1,
-      })
-    })
-
-    // Build edge styles map
-    const edgeStyles = new Map<string, any>()
-    edges.forEach((edge) => {
-      const edgeTemplate = getEdgeTemplateById(edge.templateId) || getDefaultEdgeTemplate()
-
-      // Apply style rules if enabled
-      let finalTemplate = edgeTemplate
-      if (enabledRules.length > 0) {
-        const sourceNode = nodes.find(n => n.id === edge.source)
-        const targetNode = nodes.find(n => n.id === edge.target)
-        if (sourceNode && targetNode) {
-          const matchedRules = evaluateEdgeRules(edge, sourceNode, targetNode, enabledRules)
-          if (matchedRules.length > 0 && matchedRules[0].applyTemplate) {
-            finalTemplate = matchedRules[0].applyTemplate
-          }
-        }
-      }
-
-      edgeStyles.set(edge.id, {
-        color: finalTemplate?.color || '#64748b',
-        thickness: finalTemplate?.thickness || 1.5,
-        opacity: finalTemplate?.opacity ?? 0.4,
-        style: finalTemplate?.style || 'solid',
-      })
-    })
-
-    // Call the new export function
-    exportFullGraphAsPNG(
-      nodes,
-      edges,
-      metaNodes,
-      nodePositions,
-      metaNodePositions,
-      nodeStyles,
-      edgeStyles,
-      'raptorgraph-export',
-      2
-    )
-  }, [nodes, edges, metaNodes, nodePositions, metaNodePositions, getEnabledRules, getCardTemplateById, getEdgeTemplateById, getDefaultEdgeTemplate, exportFullGraphAsPNG])
 
   // Handler to rerun physics layout - reset everything like a refresh
   const handleRerunLayout = useCallback(() => {
@@ -2723,20 +2653,6 @@ export function G6Graph() {
         onMouseLeave={handleMouseUp}
       />
 
-      {/* PERFORMANCE: FPS Counter */}
-      <div className="absolute top-4 left-4 px-3 py-2 bg-dark-secondary/90 border border-dark rounded-lg">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-400">FPS:</span>
-          <span className={`font-medium text-sm ${
-            fps >= 50 ? 'text-green-400' :
-            fps >= 30 ? 'text-yellow-400' :
-            'text-red-400'
-          }`}>
-            {fps}
-          </span>
-        </div>
-      </div>
-
       {/* Export menu */}
       {nodes.length > 0 && (
         <div className="absolute top-4 right-4 export-menu-container">
@@ -2749,20 +2665,9 @@ export function G6Graph() {
             <span className="max-w-0 group-hover:max-w-xs transition-all duration-200 whitespace-nowrap overflow-hidden">Export</span>
           </button>
 
-          {/* Export dropdown */}
+          {/* Export - direct SVG export (no dropdown needed) */}
           {showExportMenu && (
             <div className="absolute top-12 right-0 bg-dark-secondary border border-dark rounded-lg shadow-lg overflow-hidden z-50 min-w-[180px]">
-              <button
-                onClick={() => {
-                  handleExportPNG()
-                  setShowExportMenu(false)
-                }}
-                className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:bg-dark-tertiary hover:text-cyber-400 transition-colors flex items-center gap-2"
-              >
-                <Download className="w-4 h-4" />
-                Export as PNG
-              </button>
-              <div className="border-t border-dark"></div>
               <button
                 onClick={() => {
                   handleExportSVG()
@@ -2808,6 +2713,16 @@ export function G6Graph() {
                     <span>{stubCount} stubs</span>
                   </div>
                 )}
+                <div className="flex items-center gap-1.5 pt-1 border-t border-dark">
+                  <span className="text-xs text-slate-400">FPS:</span>
+                  <span className={`font-medium ${
+                    fps >= 50 ? 'text-green-400' :
+                    fps >= 30 ? 'text-yellow-400' :
+                    'text-red-400'
+                  }`}>
+                    {fps}
+                  </span>
+                </div>
               </div>
             </div>
           )}

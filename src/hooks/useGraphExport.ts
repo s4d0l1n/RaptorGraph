@@ -3,129 +3,9 @@ import { toast } from '@/components/ui/Toast'
 import type { GraphNode, GraphEdge, MetaNode } from '@/types'
 
 /**
- * Hook for exporting graph visualization as PNG or SVG
+ * Hook for exporting graph visualization as SVG
  */
 export function useGraphExport() {
-  /**
-   * Export canvas as high-resolution PNG
-   * @param canvas - The canvas element to export
-   * @param filename - Output filename (without extension)
-   * @param scale - Scale factor for higher resolution (default: 2 for 2x resolution)
-   */
-  const exportAsPNG = useCallback(async (
-    canvas: HTMLCanvasElement | null,
-    filename = 'raptorgraph-export',
-    scale = 2
-  ) => {
-    if (!canvas) {
-      toast.error('No graph to export')
-      return
-    }
-
-    try {
-      // Create a new canvas with higher resolution
-      const exportCanvas = document.createElement('canvas')
-      const ctx = exportCanvas.getContext('2d')
-
-      if (!ctx) {
-        toast.error('Failed to create export context')
-        return
-      }
-
-      // Set higher resolution dimensions
-      exportCanvas.width = canvas.width * scale
-      exportCanvas.height = canvas.height * scale
-
-      // Scale the context
-      ctx.scale(scale, scale)
-
-      // Draw the original canvas onto the export canvas
-      ctx.drawImage(canvas, 0, 0)
-
-      // Convert to blob
-      const blob = await new Promise<Blob | null>((resolve) => {
-        exportCanvas.toBlob(resolve, 'image/png', 1.0)
-      })
-
-      if (!blob) {
-        toast.error('Failed to generate image')
-        return
-      }
-
-      // Create download link
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `${filename}.png`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(url)
-
-      toast.success(`Exported as ${filename}.png (${exportCanvas.width}x${exportCanvas.height}px)`)
-    } catch (error) {
-      console.error('Export error:', error)
-      toast.error('Failed to export graph')
-    }
-  }, [])
-
-  /**
-   * Export canvas with custom dimensions
-   */
-  const exportWithDimensions = useCallback(async (
-    canvas: HTMLCanvasElement | null,
-    filename: string,
-    width: number,
-    height: number
-  ) => {
-    if (!canvas) {
-      toast.error('No graph to export')
-      return
-    }
-
-    try {
-      const exportCanvas = document.createElement('canvas')
-      const ctx = exportCanvas.getContext('2d')
-
-      if (!ctx) {
-        toast.error('Failed to create export context')
-        return
-      }
-
-      exportCanvas.width = width
-      exportCanvas.height = height
-
-      // Scale to fit the specified dimensions
-      const scaleX = width / canvas.width
-      const scaleY = height / canvas.height
-      ctx.scale(scaleX, scaleY)
-
-      ctx.drawImage(canvas, 0, 0)
-
-      const blob = await new Promise<Blob | null>((resolve) => {
-        exportCanvas.toBlob(resolve, 'image/png', 1.0)
-      })
-
-      if (!blob) {
-        toast.error('Failed to generate image')
-        return
-      }
-
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `${filename}.png`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(url)
-
-      toast.success(`Exported as ${filename}.png (${width}x${height}px)`)
-    } catch (error) {
-      console.error('Export error:', error)
-      toast.error('Failed to export graph')
-    }
-  }, [])
 
   /**
    * Export graph as SVG showing all nodes on the canvas
@@ -138,11 +18,6 @@ export function useGraphExport() {
     metaNodePositions: Map<string, { x: number; y: number }>,
     nodeStyles: Map<string, any>,
     edgeStyles: Map<string, any>,
-    canvasWidth: number,
-    canvasHeight: number,
-    zoom: number,
-    panOffset: { x: number; y: number },
-    rotation: number,
     filename = 'raptorgraph-export'
   ) => {
     try {
@@ -183,6 +58,68 @@ export function useGraphExport() {
       bg.setAttribute('fill', '#0f172a')
       svg.appendChild(bg)
 
+      // Helper function to detect line intersection
+      const getLineIntersection = (
+        x1: number, y1: number, x2: number, y2: number,
+        x3: number, y3: number, x4: number, y4: number
+      ): { x: number; y: number } | null => {
+        const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if (Math.abs(denom) < 0.001) return null
+
+        const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
+        const u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom
+
+        if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+          return {
+            x: x1 + t * (x2 - x1),
+            y: y1 + t * (y2 - y1)
+          }
+        }
+        return null
+      }
+
+      // Detect edge crossings
+      const edgeCrossings = new Map<string, Array<{ x: number; y: number }>>()
+      const edgeSegments: Array<{ edgeId: string; x1: number; y1: number; x2: number; y2: number }> = []
+
+      // Collect all edge segments
+      edges.forEach((edge) => {
+        const sourcePos = nodePositions.get(edge.source)
+        const targetPos = nodePositions.get(edge.target)
+        if (sourcePos && targetPos) {
+          edgeSegments.push({
+            edgeId: edge.id,
+            x1: sourcePos.x,
+            y1: sourcePos.y,
+            x2: targetPos.x,
+            y2: targetPos.y
+          })
+        }
+      })
+
+      // Find intersections
+      for (let i = 0; i < edgeSegments.length; i++) {
+        for (let j = i + 1; j < edgeSegments.length; j++) {
+          const seg1 = edgeSegments[i]
+          const seg2 = edgeSegments[j]
+
+          const intersection = getLineIntersection(
+            seg1.x1, seg1.y1, seg1.x2, seg1.y2,
+            seg2.x1, seg2.y1, seg2.x2, seg2.y2
+          )
+
+          if (intersection) {
+            // Add crossing to the edge that should "hop"
+            const hopEdgeId = seg1.edgeId < seg2.edgeId ? seg1.edgeId : seg2.edgeId
+
+            if (!edgeCrossings.has(hopEdgeId)) {
+              edgeCrossings.set(hopEdgeId, [])
+            }
+            edgeCrossings.get(hopEdgeId)!.push(intersection)
+          }
+        }
+      }
+
       // Draw edges first (so they appear behind nodes)
       edges.forEach((edge) => {
         const sourcePos = nodePositions.get(edge.source)
@@ -190,18 +127,78 @@ export function useGraphExport() {
         if (!sourcePos || !targetPos) return
 
         const style = edgeStyles.get(edge.id) || {}
-        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line')
-        line.setAttribute('x1', sourcePos.x.toString())
-        line.setAttribute('y1', sourcePos.y.toString())
-        line.setAttribute('x2', targetPos.x.toString())
-        line.setAttribute('y2', targetPos.y.toString())
-        line.setAttribute('stroke', style.color || '#64748b')
-        line.setAttribute('stroke-width', style.thickness?.toString() || '1.5')
-        line.setAttribute('stroke-opacity', style.opacity?.toString() || '0.4')
-        if (style.style === 'dashed') {
-          line.setAttribute('stroke-dasharray', '5,5')
+        const crossings = edgeCrossings.get(edge.id) || []
+
+        if (crossings.length === 0) {
+          // No crossings - draw simple line
+          const line = document.createElementNS('http://www.w3.org/2000/svg', 'line')
+          line.setAttribute('x1', sourcePos.x.toString())
+          line.setAttribute('y1', sourcePos.y.toString())
+          line.setAttribute('x2', targetPos.x.toString())
+          line.setAttribute('y2', targetPos.y.toString())
+          line.setAttribute('stroke', style.color || '#64748b')
+          line.setAttribute('stroke-width', style.thickness?.toString() || '1.5')
+          line.setAttribute('stroke-opacity', style.opacity?.toString() || '0.4')
+          if (style.style === 'dashed') {
+            line.setAttribute('stroke-dasharray', '5,5')
+          }
+          svg.appendChild(line)
+        } else {
+          // Has crossings - draw path with hop arcs
+          const hopRadius = 8
+
+          // Calculate line direction
+          const dx = targetPos.x - sourcePos.x
+          const dy = targetPos.y - sourcePos.y
+          const lineLength = Math.sqrt(dx * dx + dy * dy)
+          const dirX = dx / lineLength
+          const dirY = dy / lineLength
+
+          // Sort crossings by distance along the line
+          const sortedCrossings = crossings.map(crossing => {
+            const distAlongLine = (crossing.x - sourcePos.x) * dirX + (crossing.y - sourcePos.y) * dirY
+            return { ...crossing, distAlongLine }
+          }).sort((a, b) => a.distAlongLine - b.distAlongLine)
+
+          // Build SVG path with arcs
+          let pathD = `M ${sourcePos.x} ${sourcePos.y} `
+
+          sortedCrossings.forEach(crossing => {
+            // Calculate perpendicular direction for arc
+            const perpX = -dirY
+            const perpY = dirX
+
+            // Points before and after the crossing
+            const beforeX = crossing.x - dirX * hopRadius
+            const beforeY = crossing.y - dirY * hopRadius
+            const afterX = crossing.x + dirX * hopRadius
+            const afterY = crossing.y + dirY * hopRadius
+
+            // Arc peak point (perpendicular to line)
+            const arcX = crossing.x + perpX * hopRadius
+            const arcY = crossing.y + perpY * hopRadius
+
+            // Draw to before crossing
+            pathD += `L ${beforeX} ${beforeY} `
+
+            // Draw arc over crossing (Q = quadratic bezier)
+            pathD += `Q ${arcX} ${arcY} ${afterX} ${afterY} `
+          })
+
+          // Draw to target
+          pathD += `L ${targetPos.x} ${targetPos.y}`
+
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+          path.setAttribute('d', pathD)
+          path.setAttribute('stroke', style.color || '#64748b')
+          path.setAttribute('stroke-width', style.thickness?.toString() || '1.5')
+          path.setAttribute('stroke-opacity', style.opacity?.toString() || '0.4')
+          path.setAttribute('fill', 'none')
+          if (style.style === 'dashed') {
+            path.setAttribute('stroke-dasharray', '5,5')
+          }
+          svg.appendChild(path)
         }
-        svg.appendChild(line)
       })
 
       // Draw meta-nodes
@@ -340,14 +337,55 @@ export function useGraphExport() {
           g.appendChild(rect)
         }
 
+        // Add icon if present
+        const iconX = pos.x
+        const iconY = pos.y - 15
+
+        if (style.icon) {
+          // Custom icon (emoji)
+          const iconSize = style.iconSize ? style.iconSize * 16 : 16
+          const iconText = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+          iconText.setAttribute('x', iconX.toString())
+          iconText.setAttribute('y', iconY.toString())
+          iconText.setAttribute('text-anchor', 'middle')
+          iconText.setAttribute('dominant-baseline', 'middle')
+          iconText.setAttribute('fill', style.iconColor || '#fff')
+          iconText.setAttribute('font-size', iconSize.toString())
+          iconText.setAttribute('font-family', 'sans-serif')
+          iconText.textContent = style.icon
+          g.appendChild(iconText)
+        } else {
+          // Default icon: circle with first letter
+          const iconRadius = 16
+          const iconCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+          iconCircle.setAttribute('cx', iconX.toString())
+          iconCircle.setAttribute('cy', iconY.toString())
+          iconCircle.setAttribute('r', iconRadius.toString())
+          iconCircle.setAttribute('fill', style.isStub ? '#64748b' : '#06b6d4')
+          g.appendChild(iconCircle)
+
+          // First letter
+          const iconLetter = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+          iconLetter.setAttribute('x', iconX.toString())
+          iconLetter.setAttribute('y', iconY.toString())
+          iconLetter.setAttribute('text-anchor', 'middle')
+          iconLetter.setAttribute('dominant-baseline', 'middle')
+          iconLetter.setAttribute('fill', '#fff')
+          iconLetter.setAttribute('font-size', '14')
+          iconLetter.setAttribute('font-weight', 'bold')
+          iconLetter.setAttribute('font-family', 'sans-serif')
+          iconLetter.textContent = style.label?.charAt(0).toUpperCase() || ''
+          g.appendChild(iconLetter)
+        }
+
         // Add node label with better text handling
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text')
         text.setAttribute('x', pos.x.toString())
-        text.setAttribute('y', pos.y.toString())
+        text.setAttribute('y', (pos.y + 8).toString())
         text.setAttribute('text-anchor', 'middle')
-        text.setAttribute('dominant-baseline', 'middle')
+        text.setAttribute('dominant-baseline', 'top')
         text.setAttribute('fill', textColor)
-        text.setAttribute('font-size', (10 * sizeMultiplier).toString())
+        text.setAttribute('font-size', '12')
         text.setAttribute('font-weight', '600')
         text.setAttribute('font-family', 'system-ui, -apple-system, sans-serif')
 
@@ -356,6 +394,49 @@ export function useGraphExport() {
         const displayText = node.label.length > maxChars ? node.label.slice(0, maxChars) + '...' : node.label
         text.textContent = displayText
         g.appendChild(text)
+
+        // Add attributes if present
+        if (style.attributeDisplays && style.attributeDisplays.length > 0) {
+          const visibleAttrs = style.attributeDisplays
+            .filter((attrDisplay: any) => attrDisplay.visible)
+            .sort((a: any, b: any) => a.order - b.order)
+
+          let yOffset = pos.y + 24
+          const maxAttrsToShow = 3
+
+          visibleAttrs.slice(0, maxAttrsToShow).forEach((attrDisplay: any) => {
+            // Get attribute value
+            let attrValue = ''
+            if (attrDisplay.attributeName === '__id__') {
+              attrValue = node.id
+            } else if (style.attributes && style.attributes[attrDisplay.attributeName]) {
+              const value = style.attributes[attrDisplay.attributeName]
+              attrValue = Array.isArray(value) ? value.join(', ') : value
+            }
+
+            if (attrValue) {
+              const fontSize = attrDisplay.fontSize || 10
+              const color = attrDisplay.color || '#94a3b8'
+              const displayLabel = attrDisplay.displayLabel || attrDisplay.attributeName
+              const prefix = attrDisplay.prefix || ''
+              const suffix = attrDisplay.suffix || ''
+              const displayText = `${prefix}${displayLabel}: ${attrValue}${suffix}`
+
+              const attrText = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+              attrText.setAttribute('x', pos.x.toString())
+              attrText.setAttribute('y', yOffset.toString())
+              attrText.setAttribute('text-anchor', 'middle')
+              attrText.setAttribute('dominant-baseline', 'top')
+              attrText.setAttribute('fill', color)
+              attrText.setAttribute('font-size', fontSize.toString())
+              attrText.setAttribute('font-family', 'sans-serif')
+              attrText.textContent = displayText
+              g.appendChild(attrText)
+
+              yOffset += fontSize + 4
+            }
+          })
+        }
 
         svg.appendChild(g)
       })
@@ -382,312 +463,7 @@ export function useGraphExport() {
     }
   }, [])
 
-  /**
-   * Export canvas region as PNG
-   */
-  const exportCanvasRegion = useCallback(async (
-    sourceCanvas: HTMLCanvasElement,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    filename = 'raptorgraph-export',
-    scale = 2
-  ) => {
-    try {
-      // Create export canvas sized exactly to the region
-      const exportCanvas = document.createElement('canvas')
-      exportCanvas.width = width * scale
-      exportCanvas.height = height * scale
-
-      const ctx = exportCanvas.getContext('2d')
-      if (!ctx) {
-        toast.error('Failed to create export context')
-        return
-      }
-
-      // Scale for high resolution and draw the source region
-      ctx.scale(scale, scale)
-      ctx.drawImage(
-        sourceCanvas,
-        x, y, width, height,  // source region
-        0, 0, width, height   // destination (full canvas)
-      )
-
-      // Convert to blob
-      const blob = await new Promise<Blob | null>((resolve) => {
-        exportCanvas.toBlob(resolve, 'image/png', 1.0)
-      })
-
-      if (!blob) {
-        toast.error('Failed to generate image')
-        return
-      }
-
-      // Download
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `${filename}.png`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(url)
-
-      toast.success(`Exported as ${filename}.png (${exportCanvas.width}x${exportCanvas.height}px)`)
-    } catch (error) {
-      console.error('Export error:', error)
-      toast.error('Failed to export graph')
-    }
-  }, [])
-
-  /**
-   * Export full graph as PNG by rendering all nodes and edges to a new canvas
-   */
-  const exportFullGraphAsPNG = useCallback(async (
-    nodes: GraphNode[],
-    edges: GraphEdge[],
-    metaNodes: MetaNode[],
-    nodePositions: Map<string, { x: number; y: number }>,
-    metaNodePositions: Map<string, { x: number; y: number }>,
-    nodeStyles: Map<string, any>,
-    edgeStyles: Map<string, any>,
-    filename = 'raptorgraph-export',
-    scale = 2
-  ) => {
-    try {
-      // Calculate bounds of all nodes
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
-
-      nodePositions.forEach((pos) => {
-        minX = Math.min(minX, pos.x - 100)
-        maxX = Math.max(maxX, pos.x + 100)
-        minY = Math.min(minY, pos.y - 100)
-        maxY = Math.max(maxY, pos.y + 100)
-      })
-
-      metaNodePositions.forEach((pos) => {
-        minX = Math.min(minX, pos.x - 200)
-        maxX = Math.max(maxX, pos.x + 200)
-        minY = Math.min(minY, pos.y - 200)
-        maxY = Math.max(maxY, pos.y + 200)
-      })
-
-      if (!isFinite(minX)) {
-        toast.error('No nodes to export')
-        return
-      }
-
-      const padding = 50
-      const viewWidth = maxX - minX + padding * 2
-      const viewHeight = maxY - minY + padding * 2
-
-      // Create canvas with high resolution
-      const canvas = document.createElement('canvas')
-      canvas.width = viewWidth * scale
-      canvas.height = viewHeight * scale
-
-      const ctx = canvas.getContext('2d')
-      if (!ctx) {
-        toast.error('Failed to create export context')
-        return
-      }
-
-      // Scale for high resolution
-      ctx.scale(scale, scale)
-
-      // Translate to center the graph
-      ctx.translate(-minX + padding, -minY + padding)
-
-      // Draw dark background
-      ctx.fillStyle = '#0f172a'
-      ctx.fillRect(minX - padding, minY - padding, viewWidth, viewHeight)
-
-      // Draw edges first
-      edges.forEach((edge) => {
-        const sourcePos = nodePositions.get(edge.source)
-        const targetPos = nodePositions.get(edge.target)
-        if (!sourcePos || !targetPos) return
-
-        const style = edgeStyles.get(edge.id) || {}
-
-        ctx.beginPath()
-        ctx.moveTo(sourcePos.x, sourcePos.y)
-        ctx.lineTo(targetPos.x, targetPos.y)
-        ctx.strokeStyle = style.color || '#64748b'
-        ctx.lineWidth = style.thickness || 1.5
-        ctx.globalAlpha = style.opacity || 0.4
-
-        if (style.style === 'dashed') {
-          ctx.setLineDash([5, 5])
-        } else {
-          ctx.setLineDash([])
-        }
-
-        ctx.stroke()
-        ctx.globalAlpha = 1
-      })
-
-      // Draw meta-nodes
-      metaNodes.forEach((metaNode) => {
-        const pos = metaNodePositions.get(metaNode.id)
-        if (!pos) return
-
-        const childCount = metaNode.childNodeIds.length
-        const cols = Math.ceil(Math.sqrt(childCount)) * 2
-        const gridWidth = cols * 100
-        const gridHeight = (gridWidth * 2) / 3
-
-        // Draw border rectangle
-        ctx.strokeStyle = '#3b82f6'
-        ctx.lineWidth = 2
-        ctx.setLineDash([8, 4])
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.05)'
-        ctx.beginPath()
-        ctx.roundRect(
-          pos.x - gridWidth / 2,
-          pos.y - gridHeight / 2,
-          gridWidth,
-          gridHeight,
-          8
-        )
-        ctx.fill()
-        ctx.stroke()
-        ctx.setLineDash([])
-
-        // Draw label
-        ctx.fillStyle = '#94a3b8'
-        ctx.font = '12px system-ui, -apple-system, sans-serif'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'bottom'
-        ctx.fillText(metaNode.label, pos.x, pos.y - gridHeight / 2 - 10)
-      })
-
-      // Draw nodes
-      nodes.forEach((node) => {
-        const pos = nodePositions.get(node.id)
-        if (!pos) return
-
-        const style = nodeStyles.get(node.id) || {}
-
-        // Get style properties
-        const sizeMultiplier = style.sizeMultiplier || 1
-        const baseWidth = 120
-        const baseHeight = 60
-        const width = baseWidth * sizeMultiplier
-        const height = baseHeight * sizeMultiplier
-        const shape = style.shape || 'rect'
-        const bgColor = style.backgroundColor || '#1e293b'
-        const borderColor = style.borderColor || '#0891b2'
-        const textColor = style.textColor || '#e2e8f0'
-        const borderWidth = style.borderWidth || 2
-
-        ctx.save()
-
-        // Draw shape based on type
-        ctx.fillStyle = bgColor
-        ctx.strokeStyle = borderColor
-        ctx.lineWidth = borderWidth
-
-        if (shape === 'circle') {
-          const radius = Math.min(width, height) / 2
-          ctx.beginPath()
-          ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2)
-          ctx.fill()
-          ctx.stroke()
-        } else if (shape === 'diamond') {
-          ctx.beginPath()
-          ctx.moveTo(pos.x, pos.y - height / 2)
-          ctx.lineTo(pos.x + width / 2, pos.y)
-          ctx.lineTo(pos.x, pos.y + height / 2)
-          ctx.lineTo(pos.x - width / 2, pos.y)
-          ctx.closePath()
-          ctx.fill()
-          ctx.stroke()
-        } else if (shape === 'triangle') {
-          ctx.beginPath()
-          ctx.moveTo(pos.x, pos.y - height / 2)
-          ctx.lineTo(pos.x + width / 2, pos.y + height / 2)
-          ctx.lineTo(pos.x - width / 2, pos.y + height / 2)
-          ctx.closePath()
-          ctx.fill()
-          ctx.stroke()
-        } else if (shape === 'star') {
-          const outerRadius = Math.min(width, height) / 2
-          const innerRadius = outerRadius * 0.4
-          ctx.beginPath()
-          for (let i = 0; i < 5; i++) {
-            const outerAngle = (i * 4 * Math.PI) / 5 - Math.PI / 2
-            const innerAngle = ((i * 4 + 2) * Math.PI) / 5 - Math.PI / 2
-            const outerX = pos.x + outerRadius * Math.cos(outerAngle)
-            const outerY = pos.y + outerRadius * Math.sin(outerAngle)
-            const innerX = pos.x + innerRadius * Math.cos(innerAngle)
-            const innerY = pos.y + innerRadius * Math.sin(innerAngle)
-            if (i === 0) ctx.moveTo(outerX, outerY)
-            else ctx.lineTo(outerX, outerY)
-            ctx.lineTo(innerX, innerY)
-          }
-          ctx.closePath()
-          ctx.fill()
-          ctx.stroke()
-        } else if (shape === 'ellipse') {
-          ctx.beginPath()
-          ctx.ellipse(pos.x, pos.y, width / 2, height / 2, 0, 0, Math.PI * 2)
-          ctx.fill()
-          ctx.stroke()
-        } else {
-          // Default: rounded rectangle
-          ctx.beginPath()
-          ctx.roundRect(pos.x - width / 2, pos.y - height / 2, width, height, 6)
-          ctx.fill()
-          ctx.stroke()
-        }
-
-        // Draw label
-        ctx.fillStyle = textColor
-        ctx.font = `600 ${10 * sizeMultiplier}px system-ui, -apple-system, sans-serif`
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-
-        const maxChars = Math.floor(width / 7)
-        const displayText = node.label.length > maxChars ? node.label.slice(0, maxChars) + '...' : node.label
-        ctx.fillText(displayText, pos.x, pos.y)
-
-        ctx.restore()
-      })
-
-      // Convert to blob
-      const blob = await new Promise<Blob | null>((resolve) => {
-        canvas.toBlob(resolve, 'image/png', 1.0)
-      })
-
-      if (!blob) {
-        toast.error('Failed to generate image')
-        return
-      }
-
-      // Download
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `${filename}.png`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(url)
-
-      toast.success(`Exported as ${filename}.png (${canvas.width}x${canvas.height}px, ${nodes.length} nodes)`)
-    } catch (error) {
-      console.error('PNG export error:', error)
-      toast.error('Failed to export as PNG')
-    }
-  }, [])
-
   return {
-    exportAsPNG,
-    exportWithDimensions,
     exportAsSVG,
-    exportCanvasRegion,
-    exportFullGraphAsPNG,
   }
 }
